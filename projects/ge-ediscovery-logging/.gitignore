@@ -9,3 +9,5 @@ archiver_jwks.json
 iam-policy-*.backup.json
 __pycache__/
 *.pyc
+portal/node_modules/
+portal/dist/

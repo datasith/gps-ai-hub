@@ -120,7 +120,12 @@ def compute_crc32c_base64(data: bytes) -> str:
     return base64.b64encode(struct.pack(">I", crc)).decode("ascii")
 
 
-def guess_extension(mime_type: str, data: bytes) -> str:
+def detect_mime_and_extension(mime_type: str, data: bytes, file_name: str = "") -> tuple[str, str]:
+    """
+    Resolves the canonical (mime_type, extension) from declared MIME type, filename,
+    and binary magic bytes. Upgrades generic 'application/octet-stream' payloads
+    using magic-byte inspection.
+    """
     mime = (mime_type or "").lower().split(";")[0].strip()
     ext_map = {
         "image/png": ".png",
@@ -128,25 +133,76 @@ def guess_extension(mime_type: str, data: bytes) -> str:
         "image/webp": ".webp",
         "image/gif": ".gif",
         "application/pdf": ".pdf",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "video/mp4": ".mp4",
+        "text/html": ".html",
         "text/plain": ".txt",
         "text/csv": ".csv",
         "text/markdown": ".md",
         "application/json": ".json",
+        "application/zip": ".zip",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
     }
+
+    magic_mime = ""
+    magic_ext = ""
+    if data:
+        if data.startswith(b"%PDF-"):
+            magic_mime, magic_ext = "application/pdf", ".pdf"
+        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+            magic_mime, magic_ext = "image/png", ".png"
+        elif data.startswith(b"\xff\xd8\xff"):
+            magic_mime, magic_ext = "image/jpeg", ".jpg"
+        elif len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            magic_mime, magic_ext = "image/webp", ".webp"
+        elif len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+            magic_mime, magic_ext = "audio/wav", ".wav"
+        elif data.startswith((b"GIF87a", b"GIF89a")):
+            magic_mime, magic_ext = "image/gif", ".gif"
+        elif data.startswith(b"ID3") or data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+            magic_mime, magic_ext = "audio/mpeg", ".mp3"
+        elif len(data) >= 12 and data[4:8] == b"ftyp":
+            magic_mime, magic_ext = "video/mp4", ".mp4"
+        elif data.startswith(b"PK\x03\x04"):
+            header_window = data[:4096]
+            if b"word/" in header_window:
+                magic_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                magic_ext = ".docx"
+            elif b"xl/" in header_window:
+                magic_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                magic_ext = ".xlsx"
+            elif b"ppt/" in header_window:
+                magic_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                magic_ext = ".pptx"
+            else:
+                magic_mime, magic_ext = "application/zip", ".zip"
+        elif data.lstrip()[:15].lower().startswith((b"<!doctype html", b"<html")):
+            magic_mime, magic_ext = "text/html", ".html"
+
+    if not mime or mime == "application/octet-stream":
+        if magic_mime:
+            return magic_mime, magic_ext
+        if file_name:
+            _, fn_ext = os.path.splitext(file_name.lower())
+            rev_map = {v: k for k, v in ext_map.items()}
+            if fn_ext in rev_map:
+                return rev_map[fn_ext], fn_ext
+
     if mime in ext_map:
-        return ext_map[mime]
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return ".png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return ".jpg"
-    if data.startswith(b"%PDF-"):
-        return ".pdf"
-    if data.startswith(b"PK\x03\x04"):
-        return ".docx"
-    return ".bin"
+        return mime, ext_map[mime]
+    if magic_ext:
+        return magic_mime or mime or "application/octet-stream", magic_ext
+    return mime or "application/octet-stream", ".bin"
+
+
+def guess_extension(mime_type: str, data: bytes) -> str:
+    _, ext = detect_mime_and_extension(mime_type, data)
+    return ext
 
 
 def sanitize_filename(name: str) -> str:
@@ -189,6 +245,8 @@ def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str
     Mints an OAuth2 access token for the given WIF subject via STS token exchange.
     Uses Google Cloud KMS asymmetricSign by default (falls back to local key only if KMS is disabled).
     """
+    if "/subject/" in subject:
+        subject = subject.split("/subject/", 1)[1].strip()
     now = int(time.time())
     cached = _STS_TOKEN_CACHE.get(subject)
     if cached and cached[1] > now + 60:
@@ -444,6 +502,68 @@ def upload_bytes_to_gcs(
     return gcs_uri, console_url
 
 
+def extract_canvas_slides(turn: dict, turn_idx: int) -> tuple[bytes, str] | None:
+    """
+    Inspects a turn's detailedAssistAnswer (steps and replies) for Canvas
+    `save_slides_to_artifact` tool calls and compiles them into a standalone,
+    self-contained HTML slide presentation (`text/html`).
+    """
+    detailed = turn.get("detailedAssistAnswer", {})
+    slides_raw: list[dict] = []
+
+    def _collect_slides(obj: object) -> None:
+        if isinstance(obj, dict):
+            fn_call = obj.get("functionCall") or obj.get("toolCall")
+            if isinstance(fn_call, dict) and fn_call.get("name") == "save_slides_to_artifact":
+                args = fn_call.get("args") or {}
+                if isinstance(args.get("slides"), list):
+                    slides_raw.extend(args["slides"])
+            if obj.get("name") == "save_slides_to_artifact" and isinstance(obj.get("args", {}).get("slides"), list):
+                slides_raw.extend(obj["args"]["slides"])
+            for v in obj.values():
+                _collect_slides(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _collect_slides(item)
+
+    _collect_slides(detailed)
+    if not slides_raw:
+        return None
+
+    slide_sections: list[str] = []
+    for s_idx, s in enumerate(slides_raw, start=1):
+        if not isinstance(s, dict):
+            continue
+        s_html = s.get("html") or s.get("content") or ""
+        s_title = s.get("title") or f"Slide {s_idx}"
+        if s_html:
+            slide_sections.append(
+                f'<section class="canvas-slide" data-slide-index="{s_idx}" data-slide-title="{s_title}">\n'
+                f"{s_html}\n"
+                f"</section>"
+            )
+
+    if not slide_sections:
+        return None
+
+    compiled_html = (
+        "<!DOCTYPE html>\n"
+        "<html lang=\"en\">\n"
+        "<head>\n"
+        "  <meta charset=\"utf-8\" />\n"
+        f"  <title>Canvas Slide Deck — Turn {turn_idx}</title>\n"
+        "  <style>\n"
+        "    body { margin: 0; padding: 24px; background: #0f172a; color: #f8fafc; font-family: system-ui, sans-serif; }\n"
+        "    .canvas-slide { margin: 0 auto 32px auto; max-width: 1280px; min-height: 720px; background: #ffffff; color: #0f172a; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.4); position: relative; }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        + "\n".join(slide_sections)
+        + "\n</body>\n</html>\n"
+    )
+    return compiled_html.encode("utf-8"), f"canvas_slides_turn_{turn_idx}.html"
+
+
 def extract_turn_content(turn: dict) -> tuple[str, str, list[dict], str]:
     """
     Extracts (response_text, thought_text, reply_files, turn_timestamp) from a session turn's
@@ -513,7 +633,8 @@ def harvest_session(
       2. Calls GetSession?includeAnswerDetails=true.
       3. Archives the raw session JSON transcript to GCS.
       4. Downloads all USER_PROVIDED and AI_GENERATED files via :downloadFile and archives them to GCS.
-      5. Returns the BigQuery rows for conversation_turns.
+      5. Compiles any interactive Canvas slide decks (`save_slides_to_artifact`) into standalone HTML artifacts.
+      6. Returns the BigQuery rows for conversation_turns.
     """
     session_name = session_info["session_name"]
     raw_principal = session_info.get("user_iam_principal") or ""
@@ -537,7 +658,7 @@ def harvest_session(
     for candidate in candidates:
         try:
             try:
-                cand_token = mint_sts_token(candidate, project_id, workforce_pool_id)
+                cand_token = get_token_for_principal(candidate, project_id, workforce_pool_id)
             except Exception:
                 cand_token = get_gcp_access_token()
             session_data = fetch_session_details(session_name, cand_token, project_id)
@@ -582,9 +703,10 @@ def harvest_session(
 
     for fid in sorted(uploaded_file_ids):
         try:
-            raw_bytes, mime_type, cd_fname = download_session_file(session_name, fid, token, project_id)
-            ext = guess_extension(mime_type, raw_bytes)
-            raw_name = logged_file_names.get(fid) or cd_fname or f"user_upload_{fid}{ext}"
+            raw_bytes, dl_mime, cd_fname = download_session_file(session_name, fid, token, project_id)
+            hint_name = logged_file_names.get(fid) or cd_fname or ""
+            mime_type, ext = detect_mime_and_extension(dl_mime, raw_bytes, hint_name)
+            raw_name = hint_name or f"user_upload_{fid}{ext}"
             fname = sanitize_filename(raw_name)
             if not os.path.splitext(fname)[1]:
                 fname += ext
@@ -601,7 +723,7 @@ def harvest_session(
                 "gcs_uri": gcs_uri,
                 "console_url": console_url,
             }
-            print(f"  [+] Archived USER_PROVIDED file {fid} ({len(raw_bytes)} bytes) -> {gcs_uri}")
+            print(f"  [+] Archived USER_PROVIDED file {fid} ({len(raw_bytes)} bytes, {mime_type}) -> {gcs_uri}")
         except urllib.error.HTTPError as e:
             print(f"  [!] Skipping fileId {fid} (HTTP {e.code})")
 
@@ -644,15 +766,11 @@ def harvest_session(
             if fid not in archived_files_by_id:
                 try:
                     raw_bytes, dl_mime, cd_fname = download_session_file(session_name, fid, token, project_id)
-                    mime_type = rf.get("mime_type") or dl_mime
-                    ext = guess_extension(mime_type, raw_bytes)
+                    hint_name = rf.get("file_name") or logged_file_names.get(fid) or cd_fname or ""
+                    declared_mime = rf.get("mime_type") or dl_mime
+                    mime_type, ext = detect_mime_and_extension(declared_mime, raw_bytes, hint_name)
                     source_label = "USER_PROVIDED" if fid in uploaded_file_ids else "AI_GENERATED"
-                    raw_name = (
-                        rf.get("file_name")
-                        or logged_file_names.get(fid)
-                        or cd_fname
-                        or f"{source_label.lower()}_{fid}{ext}"
-                    )
+                    raw_name = hint_name or f"{source_label.lower()}_{fid}{ext}"
                     fname = sanitize_filename(raw_name)
                     if not os.path.splitext(fname)[1]:
                         fname += ext
@@ -675,6 +793,25 @@ def harvest_session(
                     continue
             if fid in archived_files_by_id and all(x["file_id"] != fid for x in turn_files):
                 turn_files.append(archived_files_by_id[fid])
+
+        canvas_deck = extract_canvas_slides(turn, idx)
+        if canvas_deck is not None:
+            slide_bytes, slide_fname = canvas_deck
+            slide_fid = f"canvas_slides_{assist_answer_id or idx}"
+            gcs_path = f"files/{engine_id}/{session_id}/AI_GENERATED/{slide_fid}_{slide_fname}"
+            gcs_uri, console_url = upload_bytes_to_gcs(slide_bytes, gcs_path, bucket_name, project_id, "text/html")
+            turn_files.append({
+                "file_id": slide_fid,
+                "file_source": "AI_GENERATED",
+                "file_name": slide_fname,
+                "mime_type": "text/html",
+                "byte_size": len(slide_bytes),
+                "sha256": hashlib.sha256(slide_bytes).hexdigest(),
+                "crc32c": compute_crc32c_base64(slide_bytes),
+                "gcs_uri": gcs_uri,
+                "console_url": console_url,
+            })
+            print(f"  [+] Archived AI_GENERATED Canvas Slide Deck ({len(slide_bytes)} bytes) -> {gcs_uri}")
 
         event_ts = (
             session_info.get("turn_timestamps", {}).get(assist_answer_id)
@@ -831,14 +968,282 @@ def clean_notebooklm_streamed_reply(text: str) -> str:
     return text.strip()
 
 
+def mint_dwd_token(user_email: str, dwd_sa_email: str, project_id: str) -> str:
+    """
+    Optional keyless Google Workspace Domain-Wide Delegation (DWD) token minting
+    via IAM Credentials signJwt -> oauth2.googleapis.com/token when DWD_SA_EMAIL is set.
+    """
+    cache_key = f"dwd:{user_email}"
+    now = int(time.time())
+    cached = _STS_TOKEN_CACHE.get(cache_key)
+    if cached and cached[1] > now + 60:
+        return cached[0]
+
+    gcp_token = get_gcp_access_token()
+    sign_url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{dwd_sa_email}:signJwt"
+    jwt_claims = {
+        "iss": dwd_sa_email,
+        "sub": user_email,
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "aud": "https://oauth2.googleapis.com/token",
+        "iat": now - 60,
+        "exp": now + 3600,
+    }
+    req = urllib.request.Request(
+        sign_url,
+        data=json.dumps({"payload": json.dumps(jwt_claims)}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {gcp_token}",
+            "Content-Type": "application/json",
+            "X-Goog-User-Project": project_id,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, context=SSL_CTX) as resp:
+        signed_jwt = json.loads(resp.read().decode("utf-8"))["signedJwt"]
+
+    token_body = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": signed_jwt,
+    }).encode("utf-8")
+    t_req = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=token_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(t_req, context=SSL_CTX) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        token = data["access_token"]
+        expires_in = float(data.get("expires_in", 3600))
+        _STS_TOKEN_CACHE[cache_key] = (token, now + expires_in)
+        return token
+
+
 def get_token_for_principal(principal: str, project_id: str, workforce_pool_id: str) -> str:
-    """Returns a WIF STS token for WIF principals or GCP access token for Workspace admins."""
+    """
+    Returns an impersonated user token:
+      1. WIF STS token via Cloud KMS asymmetricSign (primary path for Workforce Identity Federation).
+      2. Optional Google Workspace DWD token if DWD_SA_EMAIL is configured and principal is a Workspace email.
+      3. Harvester GCP access token fallback.
+    """
     if not principal:
         return get_gcp_access_token()
+    if workforce_pool_id:
+        try:
+            return mint_sts_token(principal, project_id, workforce_pool_id)
+        except Exception:
+            pass
+    dwd_sa = os.environ.get("DWD_SA_EMAIL", "").strip()
+    if dwd_sa and "@" in principal:
+        email = principal.split("/")[-1]
+        try:
+            return mint_dwd_token(email, dwd_sa, project_id)
+        except Exception:
+            pass
+    return get_gcp_access_token()
+
+
+def download_notebook_scotty_media(
+    res_name: str,
+    loc: str,
+    token: str,
+    project_id: str,
+) -> tuple[bytes, str] | None:
+    """
+    Downloads a binary NotebookLM source or Studio media artifact (Audio Overview,
+    Video Overview, Slide Deck PDF, Infographic PNG) via Discovery Engine's
+    Scotty media download endpoint (`/download/v1alpha/{res_name}:download?alt=media`).
+    """
+    prefix = f"{loc}-" if loc != "global" else ""
+    url = f"https://{prefix}discoveryengine.googleapis.com/download/v1alpha/{res_name}:download?alt=media"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Goog-User-Project": project_id,
+        },
+    )
     try:
-        return mint_sts_token(principal, project_id, workforce_pool_id)
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=30) as resp:
+            data = resp.read()
+            if not data:
+                return None
+            ctype = resp.headers.get("Content-Type", "application/octet-stream")
+            return data, ctype
     except Exception:
-        return get_gcp_access_token()
+        return None
+
+
+def harvest_notebooklm_studio_and_notes(
+    nb_name: str,
+    nb_id: str,
+    loc: str,
+    nb_detail: dict,
+    logged_note_ids: set[str],
+    token: str,
+    bucket_name: str,
+    project_id: str,
+) -> list[dict]:
+    """
+    Discovers and archives all 12 NotebookLM Studio modalities:
+      - Audio Overviews (.wav)
+      - Video Overviews (.mp4)
+      - Slide Decks (.pdf / .json)
+      - Infographics (.png)
+      - Flashcards, Quizzes, Mind Maps (.json)
+      - Reports, Briefing Docs, Study Guides, FAQs, Timelines, Studio Notes (.md)
+    Uploads each artifact to gs://{bucket_name}/notebooks/{loc}/{nb_id}/studio/
+    and returns structured studio artifact records.
+    """
+    prefix = f"{loc}-" if loc != "global" else ""
+    studio_records: list[dict] = []
+    seen_ids: set[str] = set()
+
+    # 1. Check audioOverview embedded on the notebook resource
+    audio_ov = nb_detail.get("audioOverview")
+    if isinstance(audio_ov, dict) and (audio_ov.get("name") or audio_ov.get("audioOverviewId") or audio_ov.get("status")):
+        ao_name = audio_ov.get("name") or f"{nb_name}/audioOverviews/default"
+        ao_id = audio_ov.get("audioOverviewId") or ao_name.split("/")[-1] or "audio_overview"
+        seen_ids.add(ao_id)
+        dl = download_notebook_scotty_media(ao_name, loc, token, project_id)
+        if dl:
+            raw_bytes, dl_mime = dl
+            mime_type, ext = detect_mime_and_extension(dl_mime or "audio/wav", raw_bytes)
+        else:
+            raw_bytes = json.dumps(audio_ov, indent=2).encode("utf-8")
+            mime_type, ext = "application/json", ".json"
+        gcs_path = f"notebooks/{loc}/{nb_id}/studio/{ao_id}{ext}"
+        gcs_uri, console_url = upload_bytes_to_gcs(raw_bytes, gcs_path, bucket_name, project_id, mime_type)
+        studio_records.append({
+            "artifact_id": ao_id,
+            "modality": "AUDIO_OVERVIEW",
+            "title": audio_ov.get("title") or "Audio Overview",
+            "state": audio_ov.get("status") or "COMPLETED",
+            "mime_type": mime_type,
+            "byte_size": len(raw_bytes),
+            "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "crc32c": compute_crc32c_base64(raw_bytes),
+            "gcs_uri": gcs_uri,
+            "console_url": console_url,
+            "extracted_text": audio_ov.get("transcript") or "",
+            "created_at": audio_ov.get("createTime") or "",
+        })
+
+    # 2. ListArtifacts on the notebook
+    list_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}/artifacts"
+    try:
+        req = urllib.request.Request(
+            list_url,
+            headers={"Authorization": f"Bearer {token}", "X-Goog-User-Project": project_id},
+        )
+        resp_data = json.loads(urllib.request.urlopen(req, context=SSL_CTX, timeout=15).read().decode("utf-8"))
+        raw_artifacts = resp_data.get("artifacts", [])
+    except Exception:
+        raw_artifacts = []
+
+    for art in raw_artifacts:
+        art_name = art.get("name", "")
+        art_id = art.get("artifactId") or art_name.split("/")[-1]
+        if not art_id or art_id in seen_ids:
+            continue
+        seen_ids.add(art_id)
+
+        art_detail = art
+        if art_name:
+            try:
+                g_req = urllib.request.Request(
+                    f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{art_name}",
+                    headers={"Authorization": f"Bearer {token}", "X-Goog-User-Project": project_id},
+                )
+                art_detail = json.loads(urllib.request.urlopen(g_req, context=SSL_CTX, timeout=15).read().decode("utf-8"))
+            except Exception:
+                pass
+
+        art_type = (art_detail.get("artifactType") or art_detail.get("type") or "REPORT").upper()
+        title = art_detail.get("title") or art_detail.get("displayName") or f"Studio {art_type.title()} ({art_id[:8]})"
+        state = art_detail.get("state") or "COMPLETED"
+        created_at = art_detail.get("createTime") or ""
+
+        # Try binary download via Scotty first for media artifacts
+        dl = download_notebook_scotty_media(art_name, loc, token, project_id) if art_name else None
+        extracted_text = ""
+        if dl:
+            raw_bytes, dl_mime = dl
+            mime_type, ext = detect_mime_and_extension(dl_mime, raw_bytes, title)
+        else:
+            # Extract text or JSON representation from artifact payload
+            extracted_text = (
+                art_detail.get("markdown")
+                or art_detail.get("text")
+                or art_detail.get("report", {}).get("markdown", "")
+                or json.dumps(art_detail, indent=2)
+            )
+            if art_type in ("FLASHCARDS", "QUIZ", "MIND_MAP"):
+                raw_bytes = json.dumps(art_detail, indent=2).encode("utf-8")
+                mime_type, ext = "application/json", ".json"
+            else:
+                raw_bytes = extracted_text.encode("utf-8")
+                mime_type, ext = "text/markdown", ".md"
+
+        gcs_path = f"notebooks/{loc}/{nb_id}/studio/{art_id}{ext}"
+        gcs_uri, console_url = upload_bytes_to_gcs(raw_bytes, gcs_path, bucket_name, project_id, mime_type)
+        studio_records.append({
+            "artifact_id": art_id,
+            "modality": art_type,
+            "title": title,
+            "state": state,
+            "mime_type": mime_type,
+            "byte_size": len(raw_bytes),
+            "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "crc32c": compute_crc32c_base64(raw_bytes),
+            "gcs_uri": gcs_uri,
+            "console_url": console_url,
+            "extracted_text": extracted_text[:4000] if extracted_text else "",
+            "created_at": created_at,
+        })
+
+    # 3. BatchGetNotes for any discovered note IDs
+    if logged_note_ids:
+        note_names = [f"{nb_name}/notes/{nid}" for nid in sorted(logged_note_ids)]
+        q_params = "&".join(f"names={urllib.parse.quote(n, safe='/')}" for n in note_names)
+        notes_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}/notes:batchGet?{q_params}"
+        try:
+            n_req = urllib.request.Request(
+                notes_url,
+                headers={"Authorization": f"Bearer {token}", "X-Goog-User-Project": project_id},
+            )
+            n_resp = json.loads(urllib.request.urlopen(n_req, context=SSL_CTX, timeout=15).read().decode("utf-8"))
+            for note in n_resp.get("notes", []):
+                if not isinstance(note, dict):
+                    continue
+                nid = note.get("noteId") or note.get("name", "").split("/")[-1]
+                if not nid or nid in seen_ids:
+                    continue
+                seen_ids.add(nid)
+                ntitle = note.get("title") or f"Studio Note ({nid[:8]})"
+                ncontent = note.get("content") or note.get("text") or json.dumps(note, indent=2)
+                raw_bytes = ncontent.encode("utf-8")
+                gcs_path = f"notebooks/{loc}/{nb_id}/studio/note_{nid}.md"
+                gcs_uri, console_url = upload_bytes_to_gcs(raw_bytes, gcs_path, bucket_name, project_id, "text/markdown")
+                studio_records.append({
+                    "artifact_id": nid,
+                    "modality": "STUDIO_NOTE",
+                    "title": ntitle,
+                    "state": "COMPLETED",
+                    "mime_type": "text/markdown",
+                    "byte_size": len(raw_bytes),
+                    "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+                    "crc32c": compute_crc32c_base64(raw_bytes),
+                    "gcs_uri": gcs_uri,
+                    "console_url": console_url,
+                    "extracted_text": ncontent[:4000],
+                    "created_at": note.get("createTime") or "",
+                })
+        except Exception:
+            pass
+
+    return studio_records
 
 
 def harvest_notebooklm_enterprise(
@@ -850,10 +1255,11 @@ def harvest_notebooklm_enterprise(
     target_notebook_id: str | None = None,
 ) -> list[dict]:
     """
-    Harvests NotebookLM Enterprise activity and notebooks across global, us, and eu.
+    Harvests NotebookLM Enterprise activity, sources, and 12-modality Studio artifacts
+    across global, us, and eu.
     """
     print("\n======================================================================")
-    print("Harvesting NotebookLM Enterprise (Prompts, Responses & Sources)")
+    print("Harvesting NotebookLM Enterprise (Prompts, Responses, Sources & Studio)")
     print("======================================================================")
     cutoff = (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
@@ -881,16 +1287,21 @@ def harvest_notebooklm_enterprise(
         if user_principal and not target_notebook_id:
             principals_to_probe.add(user_principal)
 
-        nb_name = (
+        raw_res_name = (
             meta.get("name")
             or jp.get("request", {}).get("name")
             or jp.get("request", {}).get("parent")
             or jp.get("response", {}).get("name")
             or ""
         )
-        if "/notebooks/" not in nb_name:
+        if "/notebooks/" not in raw_res_name:
             continue
-        nb_name = nb_name.split("/sources/")[0].split("/audioOverviews/")[0]
+        nb_name = (
+            raw_res_name.split("/sources/")[0]
+            .split("/audioOverviews/")[0]
+            .split("/artifacts/")[0]
+            .split("/notes/")[0]
+        )
         parts = nb_name.split("/")
         loc = parts[parts.index("locations") + 1] if "locations" in parts else "global"
         nb_id = parts[parts.index("notebooks") + 1]
@@ -905,6 +1316,7 @@ def harvest_notebooklm_enterprise(
             "title": jp.get("response", {}).get("title", ""),
             "chat_turns": [],
             "logged_sources": {},
+            "logged_note_ids": set(),
             "latest_timestamp": ts,
         })
         if user_principal and not nb_info["user_iam_principal"]:
@@ -913,6 +1325,11 @@ def harvest_notebooklm_enterprise(
             nb_info["title"] = jp["response"]["title"]
         if ts:
             nb_info["latest_timestamp"] = ts
+
+        if "/notes/" in raw_res_name:
+            nid = raw_res_name.split("/notes/")[1].split("/")[0]
+            if nid:
+                nb_info["logged_note_ids"].add(nid)
 
         if method == "GenerateFreeFormStreamed":
             user_query = jp.get("request", {}).get("userQuery", "")
@@ -973,6 +1390,7 @@ def harvest_notebooklm_enterprise(
                         "title": nb.get("title", ""),
                         "chat_turns": [],
                         "logged_sources": {},
+                        "logged_note_ids": set(),
                         "latest_timestamp": nb.get("metadata", {}).get("lastViewed") or nb.get("metadata", {}).get("createTime"),
                     })
                     if nb.get("title") and not nb_info["title"]:
@@ -991,15 +1409,37 @@ def harvest_notebooklm_enterprise(
         prefix = f"{loc}-" if loc != "global" else ""
 
         nb_detail = {}
+        nb_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}"
+        cand_tokens = [tok]
         try:
-            nb_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}"
-            req = urllib.request.Request(
-                nb_url,
-                headers={"Authorization": f"Bearer {tok}", "X-Goog-User-Project": project_id},
-            )
-            nb_detail = json.loads(urllib.request.urlopen(req, context=SSL_CTX).read().decode("utf-8"))
-        except Exception as e:
-            print(f"  [!] Could not GET notebook {nb_id} ({loc}): {e}")
+            gcp_tok = get_gcp_access_token()
+            if gcp_tok not in cand_tokens:
+                cand_tokens.append(gcp_tok)
+        except Exception:
+            pass
+        for fp in FALLBACK_PRINCIPALS:
+            try:
+                fp_tok = get_token_for_principal(fp, project_id, workforce_pool_id)
+                if fp_tok not in cand_tokens:
+                    cand_tokens.append(fp_tok)
+            except Exception:
+                pass
+
+        last_nb_err = None
+        for c_tok in cand_tokens:
+            try:
+                req = urllib.request.Request(
+                    nb_url,
+                    headers={"Authorization": f"Bearer {c_tok}", "X-Goog-User-Project": project_id},
+                )
+                nb_detail = json.loads(urllib.request.urlopen(req, context=SSL_CTX).read().decode("utf-8"))
+                tok = c_tok
+                break
+            except Exception as e:
+                last_nb_err = e
+                continue
+        if not nb_detail and last_nb_err:
+            print(f"  [!] Could not GET notebook {nb_id} ({loc}): {last_nb_err}")
 
         title = nb_detail.get("title") or nb_info.get("title") or f"Untitled Notebook ({nb_id[:8]})"
         create_time = nb_detail.get("metadata", {}).get("createTime") or nb_info.get("latest_timestamp") or now_iso
@@ -1033,6 +1473,17 @@ def harvest_notebooklm_enterprise(
                     "metadata": {"sourceAddedTimestamp": lsrc["added_timestamp"]},
                 })
 
+        studio_artifacts = harvest_notebooklm_studio_and_notes(
+            nb_name=nb_name,
+            nb_id=nb_id,
+            loc=loc,
+            nb_detail=nb_detail,
+            logged_note_ids=nb_info.get("logged_note_ids", set()),
+            token=tok,
+            bucket_name=bucket_name,
+            project_id=project_id,
+        )
+
         archive_payload = {
             "notebook_id": nb_id,
             "notebook_name": nb_name,
@@ -1041,6 +1492,7 @@ def harvest_notebooklm_enterprise(
             "title": title,
             "notebook_resource": nb_detail,
             "enriched_sources": enriched_sources,
+            "studio_artifacts": studio_artifacts,
             "chat_turns": nb_info["chat_turns"],
             "harvested_at": now_iso,
         }
@@ -1053,7 +1505,8 @@ def harvest_notebooklm_enterprise(
         )
         print(
             f"  [+] Archived NotebookLM '{title}' ({nb_id}, {loc}, User: {principal}, "
-            f"{len(enriched_sources)} sources, {len(nb_info['chat_turns'])} chat turns) -> {archive_gcs_uri}"
+            f"{len(enriched_sources)} sources, {len(studio_artifacts)} studio artifacts, "
+            f"{len(nb_info['chat_turns'])} chat turns) -> {archive_gcs_uri}"
         )
 
         nb_files: list[dict] = []
@@ -1075,6 +1528,19 @@ def harvest_notebooklm_enterprise(
                 "crc32c": archive_crc32c,
                 "gcs_uri": archive_gcs_uri,
                 "console_url": archive_console_url,
+            })
+
+        for st_art in studio_artifacts:
+            nb_files.append({
+                "file_id": st_art["artifact_id"],
+                "file_source": "NOTEBOOK_STUDIO",
+                "file_name": f"[{st_art['modality']}] {st_art['title']}",
+                "mime_type": st_art["mime_type"],
+                "byte_size": st_art["byte_size"],
+                "sha256": st_art["sha256"],
+                "crc32c": st_art["crc32c"],
+                "gcs_uri": st_art["gcs_uri"],
+                "console_url": st_art["console_url"],
             })
 
         engine_label = f"notebooklm-enterprise-{loc}"
@@ -1105,7 +1571,7 @@ def harvest_notebooklm_enterprise(
                     "event_timestamp": ct["timestamp"] or create_time,
                     "harvested_at": now_iso,
                 })
-        elif enriched_sources or title:
+        elif enriched_sources or studio_artifacts or title:
             bq_rows.append({
                 "session_id": nb_id,
                 "turn_index": 1,
@@ -1151,7 +1617,7 @@ def harvest_single_event(log_entry: dict) -> dict:
 
     if "gemini_enterprise_user_activity" in log_name:
         session_name = ""
-        if method == "StreamAssist":
+        if method in ("StreamAssist", "Assist"):
             ans_name = jp.get("response", {}).get("answer", {}).get("name", "")
             if "/sessions/" in ans_name:
                 session_name = ans_name.split("/assistAnswers/")[0]
@@ -1194,7 +1660,19 @@ def harvest_single_event(log_entry: dict) -> dict:
         }
 
     elif "notebooklm_enterprise_user_activity" in log_name:
-        if method not in ("GenerateFreeFormStreamed", "BatchCreateSources", "CreateNotebook"):
+        nb_supported_methods = {
+            "GenerateFreeFormStreamed",
+            "BatchCreateSources",
+            "CreateNotebook",
+            "CreateArtifact",
+            "GetArtifact",
+            "ListArtifacts",
+            "CreateAudioOverview",
+            "CreateNote",
+            "MutateNote",
+            "BatchGetNotes",
+        }
+        if method not in nb_supported_methods:
             return {"status": "skipped", "reason": f"Ignored NotebookLM method {method}"}
 
         nb_name = (
@@ -1207,7 +1685,12 @@ def harvest_single_event(log_entry: dict) -> dict:
         if "/notebooks/" not in nb_name:
             return {"status": "skipped", "reason": "No notebook resource name in log entry"}
 
-        nb_name = nb_name.split("/sources/")[0].split("/audioOverviews/")[0]
+        nb_name = (
+            nb_name.split("/sources/")[0]
+            .split("/audioOverviews/")[0]
+            .split("/artifacts/")[0]
+            .split("/notes/")[0]
+        )
         parts = nb_name.split("/")
         nb_id = parts[parts.index("notebooks") + 1]
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", nb_id):

@@ -204,13 +204,18 @@ def main() -> None:
     sink_filter = (
         f'(logName="projects/{PROJECT_ID}/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity" '
         f'AND (jsonPayload.logMetadata.methodName="StreamAssist" '
+        f'OR jsonPayload.logMetadata.methodName="Assist" '
         f'OR jsonPayload.logMetadata.methodName="UploadSessionFile" '
         f'OR jsonPayload.logMetadata.methodName="AddContextFile")) '
         f'OR '
         f'(logName="projects/{PROJECT_ID}/logs/discoveryengine.googleapis.com%2Fnotebooklm_enterprise_user_activity" '
         f'AND (jsonPayload.logMetadata.methodName="GenerateFreeFormStreamed" '
         f'OR jsonPayload.logMetadata.methodName="BatchCreateSources" '
-        f'OR jsonPayload.logMetadata.methodName="CreateNotebook"))'
+        f'OR jsonPayload.logMetadata.methodName="CreateNotebook" '
+        f'OR jsonPayload.logMetadata.methodName="CreateArtifact" '
+        f'OR jsonPayload.logMetadata.methodName="CreateAudioOverview" '
+        f'OR jsonPayload.logMetadata.methodName="CreateNote" '
+        f'OR jsonPayload.logMetadata.methodName="MutateNote"))'
     )
     topic_dest = f"pubsub.googleapis.com/projects/{PROJECT_ID}/topics/{PUBSUB_TOPIC}"
     sink_desc = run_cmd(

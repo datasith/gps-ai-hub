@@ -24,7 +24,7 @@ Discovery Engine compares the OAuth 2.0 Bearer token's identity against the sess
 }
 ```
 
-### 1.2 Server-Side WIF STS Token Exchange Backed by Google Cloud KMS (`ediscovery-archiver`)
+### 1.2 Server-Side WIF STS Token Exchange Backed by Google Cloud KMS (`ediscovery-archiver`) & Optional DWD Fallback
 Because Workforce Identity Pools map external assertions to Google Cloud federated principals based on the pool-level subject (`google.subject`), any OIDC provider within the **same** Workforce Identity Pool (`locations/global/workforcePools/<YOUR_WORKFORCE_POOL_ID>`) that maps `google.subject = assertion.sub` produces the **exact same federated principal** (`principal://iam.googleapis.com/locations/global/workforcePools/<YOUR_WORKFORCE_POOL_ID>/subject/<USER_SUBJECT>`).
 
 `setup_ediscovery_archiver_provider.py` provisions:
@@ -33,7 +33,9 @@ Because Workforce Identity Pools map external assertions to Google Cloud federat
 
 At runtime, `ge_harvest.py` computes the SHA-256 digest of the JWT signing input (`header.payload`), calls `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricSign` via IAM-authenticated HTTPS, and performs an RFC 8693 OAuth 2.0 Token Exchange against `https://sts.googleapis.com/v1/token` for each session owner discovered in Cloud Logging. **No private key ever exists on disk or inside the Cloud Run container.**
 
-### 1.3 Session File Upload (`:uploadFile`) and Download (`:downloadFile`) Endpoints
+For hybrid environments that also run Google Workspace / Cloud Identity engines (`user:alice@corp.com`), `ge_harvest.py` includes an automatic keyless **Google Workspace Domain-Wide Delegation (DWD)** fallback (`mint_dwd_token()`) via `iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{DWD_SA_EMAIL}:signJwt` when `DWD_SA_EMAIL` is configured.
+
+### 1.3 Session File Upload (`:uploadFile`), Download (`:downloadFile`), Magic-Byte Inspection & Interactive Canvas Slide Deck Compilation
 - **Upload (`USER_PROVIDED`)**:
   ```http
   POST https://{location}-discoveryengine.googleapis.com/upload/v1alpha/{session_name}:uploadFile
@@ -50,8 +52,12 @@ At runtime, `ge_harvest.py` computes the SHA-256 digest of the JWT signing input
   Authorization: Bearer <WIF_STS_TOKEN>
   X-Goog-User-Project: <YOUR_GCP_PROJECT_ID>
   ```
+- **Magic-Byte MIME & Extension Detection (`detect_mime_and_extension`)**:
+  Discovery Engine frequently returns `application/octet-stream` for AI-generated artifacts or extensionless file IDs. Before uploading to Cloud Storage or writing to BigQuery, `ge_harvest.py` inspects the leading magic bytes of every downloaded binary payload to automatically classify `.pdf` (`%PDF-`), `.png` (`\x89PNG`), `.jpg` (`\xff\xd8\xff`), `.webp` (`RIFF....WEBP`), `.gif` (`GIF8`), `.wav` (`RIFF....WAVE`), `.mp3` (`ID3` / `\xff\xfb`), `.mp4` (`ftyp`), `.docx` / `.xlsx` / `.pptx` (PK ZIP headers + internal Office XML paths), and `.html`.
+- **Interactive Canvas Slide Deck Compilation (`extract_canvas_slides`)**:
+  When a user creates a presentation inside Gemini Enterprise Canvas, Discovery Engine records a `save_slides_to_artifact` tool call inside `detailedAssistAnswer.replies[]` rather than storing a binary file in `:listFiles`. `ge_harvest.py` extracts all slides from `save_slides_to_artifact`, compiles them into a standalone, self-contained HTML presentation (`text/html` with keyboard navigation and print/PDF styling), computes `SHA-256` and `CRC32C` digests, and archives the presentation under `AI_GENERATED`.
 
-### 1.4 NotebookLM Enterprise Observability & REST API Contracts
+### 1.4 NotebookLM Enterprise Observability, 12-Modality Studio Harvesting & Scotty Media Download Contracts
 Unlike standard Gemini Enterprise chat engines (`engines/*`), **NotebookLM Enterprise** is configured at the **Project level** and uses a dedicated Cloud Logging stream and `v1alpha` REST resource hierarchy:
 
 1. **Project-Level Sensitive Logging Configuration**:
@@ -75,11 +81,20 @@ Unlike standard Gemini Enterprise chat engines (`engines/*`), **NotebookLM Enter
    - `NotebookService.GenerateFreeFormStreamed`: Captures `userIamPrincipal`, `request.name` (`projects/{num}/locations/{loc}/notebooks/{id}`), `request.userQuery` (the exact user prompt), and cumulative streamed chunks in `serviceTextReply` (which `ge_harvest.py` deduplicates and reassembles via `clean_notebooklm_streamed_reply()`).
    - `NotebookService.CreateNotebook` / `GetNotebook`: Captures `response.name` and `response.title`.
    - `SourceService.BatchCreateSources`: Captures `response.sources[]` (`name`, `sourceId.id`, `title`, `settings.status`) and `status.message` (which records attempted external `web_content.url` values when URL ingestion fails).
-3. **Per-User WIF STS Notebook & Source Discovery**:
+   - `AudioOverviewService.*` / `NotebookService.CreateNote` / `NotebookService.MutateNote`: Captures NotebookLM Studio artifact creation and studio note updates.
+3. **Per-User WIF STS Notebook, Source & 12-Modality Studio Discovery**:
    Because private notebooks (`isShared: false`) are owned by the creating WIF user, `ge_harvest.py` mints a short-lived WIF STS token via `ediscovery-archiver` for each active user and calls:
    - `GET https://{location}-discoveryengine.googleapis.com/v1alpha/projects/{project}/locations/{location}/notebooks:listRecentlyViewed`
    - `GET https://{location}-discoveryengine.googleapis.com/v1alpha/projects/{project}/locations/{location}/notebooks/{notebook_id}`
    - `GET https://{location}-discoveryengine.googleapis.com/v1alpha/projects/{project}/locations/{location}/notebooks/{notebook_id}/sources/{source_id}` (returning `title`, `metadata.wordCount`, `metadata.tokenCount`, `metadata.sourceAddedTimestamp`, and origin metadata for PDFs, Markdown/text, Google Drive docs, YouTube videos, web URLs, and Agentspace sources).
+   - `GET https://{location}-discoveryengine.googleapis.com/v1alpha/projects/{project}/locations/{location}/notebooks/{notebook_id}/audioOverviews` and `/notes`
+   - **Scotty Media Download (`download_notebook_scotty_media`)**: Downloads binary Studio artifacts (`AUDIO_OVERVIEW` `.mp3`, `VIDEO_OVERVIEW` `.mp4`, `SLIDE_DECK` `.pdf`, `INFOGRAPHIC` `.png`) via:
+     ```http
+     GET https://{location}-discoveryengine.googleapis.com/download/v1alpha/{resource_name}:download?alt=media
+     Authorization: Bearer <WIF_STS_TOKEN>
+     X-Goog-User-Project: <YOUR_GCP_PROJECT_ID>
+     ```
+     and captures structured JSON/Markdown Studio artifacts across all 12 modalities (`AUDIO_OVERVIEW`, `VIDEO_OVERVIEW`, `SLIDE_DECK`, `INFOGRAPHIC`, `REPORT`, `FLASHCARDS`, `QUIZ`, `MIND_MAP`, `STUDY_GUIDE`, `FAQ`, `TIMELINE`, `BRIEFING_DOC`, `STUDIO_NOTE`).
 
 ### 1.5 Custom Agent Observability: No-Code Agents vs. ADK Agents
 Enabling `observabilityConfig` on a Gemini Enterprise **Engine** (`engines/{engine_id}`) only enables logging for the default core assistant (`core_assistant`). Each custom agent registered under `engines/{engine_id}/assistants/default_assistant/agents/{agent_id}` has its own independent `observabilityConfig` field:
@@ -110,8 +125,9 @@ Enabling `observabilityConfig` on a Gemini Enterprise **Engine** (`engines/{engi
 
 ---
 
-## 2. Cloud Storage Archive Layout
+## 2. Cloud Storage Archive Layout & Self-Contained Compliance Review Portal (`portal/`)
 
+### 2.1 Cloud Storage Archive Hierarchy
 All harvested artifacts are stored in `gs://<YOUR_GCP_PROJECT_ID>-ge-ediscovery` with **Uniform Bucket-Level Access (UBLA)** and **Object Versioning** enabled:
 
 ```text
@@ -126,14 +142,24 @@ gs://<YOUR_GCP_PROJECT_ID>-ge-ediscovery/
 │           ├── USER_PROVIDED/
 │           │   └── <FILE_ID>_<SANITIZED_FILENAME>
 │           └── AI_GENERATED/
-│               └── <FILE_ID>_<SANITIZED_FILENAME>
+│               ├── <FILE_ID>_<SANITIZED_FILENAME>
+│               └── canvas_slides_turn_<N>_<HASH>_canvas_presentation.html
 └── notebooks/
     └── <LOCATION>/
         └── <NOTEBOOK_ID>/
-            └── notebook_archive.json          # Full Notebook metadata, enriched sources[], and prompt/response turns
+            ├── notebook_archive.json          # Full Notebook metadata, enriched sources[], studio_artifacts[], and turns
+            └── studio/
+                └── <MODALITY>/
+                    └── <ARTIFACT_ID>_<TITLE>.(mp3|mp4|pdf|png|json|md)
 ```
 
 Each file record written into `conversation_turns.files` in BigQuery includes both **SHA-256** (hex) and **RFC 3720 CRC32C** (base64, matching Google Cloud Storage's native object checksum) to guarantee cryptographic chain-of-custody verification.
+
+### 2.2 Self-Contained Compliance & Legal Brief Narrative Review Portal (`ge-ediscovery-portal`)
+`portal/` and `deploy_portal.py` package the React 18 Legal Brief Narrative UI (`portal/src/`) and a lightweight Python HTTP API server (`portal/server.py`) into a single multi-stage container (`portal/Dockerfile`) deployed to Cloud Run (`ge-ediscovery-portal`, `--no-allow-unauthenticated`):
+- `GET /api/logs`: Queries `<PROJECT_ID>.ge_ediscovery.conversation_turns` and returns structured `processed_logs`, `notebook_sources`, `notebook_chat`, and `notebook_studio` arrays mapped to the Legal Brief Narrative schema (including `sha256` and `crc32c` integrity checksums on every input/output asset).
+- `GET /api/search?q=<QUERY>&source=all|ge_core|notebooks`: Executes parameterized BigQuery `UNNEST(files)` / substring searches across prompts, responses, reasoning traces, and file names without SQL injection risk.
+- `GET /api/media?uri=gs://<BUCKET>/<OBJECT>`: Enforces strict bucket allowlisting (`gs://<PROJECT_ID>-ge-ediscovery/`), resolves missing file extensions, and streams binary PDFs, images, HTML slide decks, audio overviews, and video overviews directly from Cloud Storage with HTTP `Range` (`206 Partial Content`) support for browser media scrubbing.
 
 ---
 

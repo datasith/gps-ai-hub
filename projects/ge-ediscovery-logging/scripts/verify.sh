@@ -135,15 +135,17 @@ except Exception as e:
     fail(f"could not inspect sinks: {e}")
 
 print("== services")
-try:
-    svc = api("GET", f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/services/{service_name}")
-    term = svc.get("terminalCondition", {})
-    if term.get("state") == "CONDITION_SUCCEEDED":
-        ok(f"{service_name} ready ({svc.get('uri')})")
-    else:
-        warn(f"{service_name} condition: {term}")
-except Exception as e:
-    fail(f"{service_name} not deployed/ready: {e}")
+portal_service_name = os.environ.get("PORTAL_SERVICE_NAME", "ge-ediscovery-portal")
+for sname in (service_name, portal_service_name):
+    try:
+        svc = api("GET", f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/services/{sname}")
+        term = svc.get("terminalCondition", {})
+        if term.get("state") == "CONDITION_SUCCEEDED":
+            ok(f"{sname} ready ({svc.get('uri')})")
+        else:
+            warn(f"{sname} condition: {term}")
+    except Exception as e:
+        warn(f"{sname} not deployed/ready: {e}")
 
 print("== delivery & dead-letter queue")
 try:

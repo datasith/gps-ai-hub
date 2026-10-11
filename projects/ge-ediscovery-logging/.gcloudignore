@@ -1,5 +1,9 @@
 *.pem
+*.backup.json
 .git
 __pycache__/
 *.pyc
 .DS_Store
+portal/
+sites-search-agent/
+
