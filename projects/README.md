@@ -25,12 +25,12 @@ Welcome to the **Google Cloud GPS AI Hub** repository (`gps-ai-hub`). This repos
 
 ---
 
-## 🔎 Gemini Enterprise eDiscovery & BigQuery Forensic Logging (`/ge-ediscovery-logging`)
+## 🔎 Gemini Enterprise eDiscovery, Compliance Review Portal & Microsoft Purview Integration (`/ge-ediscovery-logging`)
 
-- 🗄️ **[Gemini Enterprise Server-Side eDiscovery Capture, Cloud Storage Archival & BigQuery Forensic Reporting](https://github.com/peterfishergcp/gps-ai-hub/tree/main/projects/ge-ediscovery-logging)**:
-  - Zero-browser-plugin, 100% server-side eDiscovery and compliance pipeline for **Gemini Enterprise** deployments backed by **Workforce Identity Federation (WIF)**.
-  - Captures full untruncated user prompts, model responses, internal model reasoning (`thought_text`), user-uploaded attachments (`USER_PROVIDED`), and AI-generated images/artifacts (`AI_GENERATED`) with `SHA-256` & `CRC32C` chain-of-custody verification into **Cloud Storage** and **BigQuery**.
-  - Includes pre-built BigQuery analytical views and table-valued functions for **File Chain-of-Custody Auditing (`v_ediscovery_file_audit`)**, **Automated Jailbreak / Prompt Injection / Exfiltration Detection (`v_jailbreak_and_security_detections`)**, and **Parameterized User Forensic Reports (`fn_user_forensic_report`)**.
+- 🗄️ **[Gemini Enterprise Server-Side eDiscovery Capture, Cloud Storage Archival, BigQuery Forensic Reporting, Compliance Review Portal & Microsoft Purview eDiscovery Connector](https://github.com/peterfishergcp/gps-ai-hub/tree/main/projects/ge-ediscovery-logging)**:
+  - Zero-browser-plugin, 100% server-side eDiscovery and compliance pipeline for **Gemini Enterprise** and **NotebookLM Enterprise** deployments backed by **Workforce Identity Federation (WIF)** and **Google Cloud KMS (`asymmetricSign` — zero private keys on disk)**.
+  - Captures full untruncated user prompts, model responses, internal model reasoning (`thought_text`), user-uploaded attachments (`USER_PROVIDED`), AI-generated PDFs/images/Canvas HTML slide decks (`AI_GENERATED`), and all 12 **NotebookLM Enterprise Studio** modalities with `SHA-256` & `CRC32C` chain-of-custody verification into **Cloud Storage** and **BigQuery**, paired with a drift-safe **`geUserNoDelete`** custom IAM role to prevent session deletion before harvest.
+  - Includes a self-contained **React 18 Compliance & Legal Brief Narrative Review Portal (`portal/`)** on Cloud Run, pre-built BigQuery forensic views (`v_ediscovery_file_audit`, `v_notebooklm_forensic_audit`, `v_jailbreak_and_security_detections`, `fn_user_forensic_report`), and a dual-track **Microsoft Purview eDiscovery & DSPM for AI Connector (`purview_connector.py`)** that pushes HTML Legal Briefs + native binary `#microsoft.graph.fileAttachment` payloads into Exchange Online custodian mailboxes for **Purview eDiscovery Cases, Holds, Searches, and Review Sets**.
 
 ---
 

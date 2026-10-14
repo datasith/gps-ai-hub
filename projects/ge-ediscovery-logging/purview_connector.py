@@ -814,7 +814,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--engine-id",
         default=os.environ.get("GE_ENGINE_ID", ""),
-        help="Optional Gemini Enterprise Engine ID filter (e.g. gemini-us-enterprise-test_1762882221278)",
+        help="Optional Gemini Enterprise Engine ID filter (e.g. my-enterprise-engine_1234567890)",
     )
     parser.add_argument("--session-id", default="", help="Optional specific session ID to push to Purview")
     parser.add_argument("--tenant-id", default=MS_TENANT_ID, help="Microsoft Entra ID Tenant ID")

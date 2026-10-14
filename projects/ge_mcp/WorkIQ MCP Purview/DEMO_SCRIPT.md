@@ -32,7 +32,7 @@ Using a single call to the WorkIQ Ask tool (with agentId "bizchat-as-gpt-scenari
 ### 🎤 Presenter Talking Points
 - *"Now let's ask Gemini Enterprise to read and summarize **`Quantum_Computing_Clean_Purview.docx`**."*
 - *"Behind the scenes, this file is not stored as plain text—it is wrapped in an AES-256 encrypted Microsoft Purview OLE2 container (`d0cf11e0a1b11ae1`)."*
-- *"Because Work IQ MCP presents my delegated user token to Microsoft Purview / Azure Rights Management, and my identity has **`VIEW` and `EXTRACT` rights** on the **`Confidential - RMS`** label, Purview issues a dynamic Use License on the fly and returns the full 7-section executive summary with a clickable SharePoint citation."*
+- *"Because Work IQ MCP presents my delegated user token to Microsoft Purview, and my identity is granted **`VIEW` and `EXTRACT` rights** by the **`Confidential - RMS`** Sensitivity Label, Purview authorizes decryption on the fly and returns the full 7-section executive summary with a clickable SharePoint citation."*
 
 ---
 
@@ -71,7 +71,7 @@ Using a single call to the WorkIQ Ask tool (with agentId "bizchat-as-gpt-scenari
 ### 🎤 Presenter Talking Points
 - *"Now let's run the exact same `Ask` query against **`SOC-2026-0919-SEC.docx`**—a security incident document in the exact same SharePoint library where I am a Site Owner."*
 - *"Even though I am an owner of the SharePoint site, the **`SOC - Restricted Block`** Purview Sensitivity Label on this file **denies `VIEW` and `EXTRACT` rights** to my user identity."*
-- *"Because Work IQ MCP strictly executes On-Behalf-Of (OBO) my signed-in identity, Azure Rights Management denies the decryption Use License, and Work IQ MCP natively blocks the document's contents from returning to Gemini Enterprise!"*
+- *"Because Work IQ MCP strictly executes On-Behalf-Of (OBO) my signed-in identity, access is blocked based on the document's Purview Sensitivity Label, and Work IQ MCP natively prevents the document's contents from returning to Gemini Enterprise!"*
 
 ---
 

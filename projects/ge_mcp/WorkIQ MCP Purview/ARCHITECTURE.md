@@ -41,9 +41,9 @@ flowchart LR
         
         BLOCK_DOC["🚫 SCENARIO B: PURVIEW BLOCKED<br/>Restricted SOC Security Document (.docx)<br/>Label: Restricted - Block Extraction<br/>protectionEnabled: true<br/>User Policy Rights: VIEW + EXTRACT Denied"]
 
-        BIZCHAT -->|"5. Requests Use License<br/>for Signed-In User"| PURVIEW
-        PURVIEW ==>|"✅ Grants Use License<br/>Decrypts AES-256 Stream"| ALLOW_DOC
-        PURVIEW -.->|"🚫 Denies Use License<br/>Blocks Extraction"| BLOCK_DOC
+        BIZCHAT -->|"5. Evaluates Purview Sensitivity Label<br/>for Signed-In User"| PURVIEW
+        PURVIEW ==>|"✅ Allowed by Purview Label<br/>Decrypts AES-256 Stream"| ALLOW_DOC
+        PURVIEW -.->|"🚫 Blocked by Purview Label<br/>Blocks Extraction"| BLOCK_DOC
     end
 
     ALLOW_DOC ==>|"6a. Returns Grounded Summary<br/>& Source Citation"| GE
@@ -72,7 +72,7 @@ sequenceDiagram
     actor User as 👤 Enterprise User<br/>(Gemini Enterprise UI)
     participant GE as ✨ Gemini Enterprise<br/>(BYO MCP Connector)
     participant WIQ as ⚡ Work IQ MCP Server<br/>(workiq.svc.cloud.microsoft/mcp)
-    participant AADRM as 🛡️ Microsoft Purview &<br/>Azure RMS Licensing
+    participant AADRM as 🛡️ Microsoft Purview<br/>Sensitivity Label Policy
     participant SPO as 📂 SharePoint Online<br/>Document Library
 
     Note over User,SPO: Scenario A: User Holds Purview VIEW + EXTRACT Rights (Confidential Document)
@@ -81,8 +81,8 @@ sequenceDiagram
     User->>GE: Clicks Confirm
     GE->>WIQ: POST /mcp (tools/call: ask, Bearer <3LO_User_Token>)
     WIQ->>SPO: Locate file & read Purview LabelInfo (protectionEnabled: true)
-    SPO->>AADRM: Request XrML Use License on behalf of signed-in user
-    AADRM-->>SPO: ✅ Use License Granted (Rights: VIEW, EXTRACT)
+    SPO->>AADRM: Evaluate Purview Sensitivity Label rights for signed-in user
+    AADRM-->>SPO: ✅ Allowed by Purview Label (Rights: VIEW, EXTRACT)
     SPO-->>WIQ: Streams decrypted content via Purview Co-Authoring
     WIQ-->>GE: Returns grounded executive summary + clickable SharePoint citation
     GE-->>User: Displays summary + source link
@@ -93,8 +93,8 @@ sequenceDiagram
     User->>GE: Clicks Confirm
     GE->>WIQ: POST /mcp (tools/call: ask, Bearer <3LO_User_Token>)
     WIQ->>SPO: Locate file & read Purview LabelInfo (protectionEnabled: true)
-    SPO->>AADRM: Request XrML Use License on behalf of signed-in user
-    AADRM-->>SPO: 🚫 Access Denied (User has 0 rights; VIEW & EXTRACT denied)
+    SPO->>AADRM: Evaluate Purview Sensitivity Label rights for signed-in user
+    AADRM-->>SPO: 🚫 Blocked by Purview Label (User has 0 rights; VIEW & EXTRACT denied)
     SPO-->>WIQ: Refuses decryption (File remains AES-256 encrypted container)
     WIQ-->>GE: Returns Purview protection block notice (Zero content leaked)
     GE-->>User: Informs user that the document is Purview-restricted and cannot be accessed
