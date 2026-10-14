@@ -15,8 +15,9 @@ Regulated enterprises deploying **Gemini Enterprise** (Google Cloud Discovery En
 6. **Spoliation Prevention & Drift-Safe Custom IAM Role (`geUserNoDelete`)** (prevents users from deleting chat history or session attachments prior to harvest while automatically staying in sync with Google updates to `roles/discoveryengine.user`)
 7. **Cryptographic Chain-of-Custody Metadata** (`SHA-256`, `CRC32C`, byte sizes, word/token counts, MIME types, and immutable Cloud Storage URIs)
 8. **BigQuery Security & Forensic Reporting + Self-Contained Compliance Review Portal (`portal/`)** (automated jailbreak/prompt-injection detection, NotebookLM Enterprise forensic views, parameterized user forensic dossiers, and a React 18 Legal Brief Narrative UI deployed on Cloud Run)
+9. **Microsoft Purview eDiscovery & DSPM for AI Integration (`purview_connector.py`)** (dual-track Microsoft Graph pipeline pushing self-contained HTML Legal Briefs + native binary `#microsoft.graph.fileAttachment` payloads into the custodian's Exchange Online `Gemini Enterprise eDiscovery` mailbox folder for Purview eDiscovery Content Search, Custodian Legal Holds, and Review Sets, plus `dataSecurityAndGovernance/processContent` for Purview DSPM for AI Activity Explorer & Audit)
 
-This solution provides a complete, zero-browser-plugin, server-side pipeline that captures, archives, and indexes every Gemini Enterprise conversation turn, binary file attachment, and NotebookLM Enterprise interaction into **Google Cloud Storage** and **BigQuery**, paired with a self-contained **Compliance & Legal Brief Review Portal** on Cloud Run.
+This solution provides a complete, zero-browser-plugin, server-side pipeline that captures, archives, and indexes every Gemini Enterprise conversation turn, binary file attachment, and NotebookLM Enterprise interaction into **Google Cloud Storage**, **BigQuery**, and **Microsoft Purview eDiscovery**, paired with a self-contained **Compliance & Legal Brief Review Portal** on Cloud Run.
 
 ---
 
@@ -70,8 +71,9 @@ flowchart LR
         H[("BigQuery Dataset (ge_ediscovery)\n• conversation_turns\n• v_ediscovery_file_audit\n• v_realtime_agent_and_file_activity\n• v_notebooklm_forensic_audit\n• v_jailbreak_and_security_detections\n• fn_user_forensic_report()")]
     end
 
-    subgraph Portal["Compliance Review Portal (ge-ediscovery-portal on Cloud Run)"]
-        UI["React 18 Legal Brief Narrative UI\n• Turn Reasoning & Grounding Citations\n• File Provenance Box (SHA-256 & CRC32C)\n• Inline PDF, HTML Slide, Image & Audio/Video Player\n• NotebookLM Sources, Chat & Studio Modality Viewer"]
+    subgraph Portal["Compliance Review Portal & Microsoft Purview eDiscovery"]
+        UI["React 18 Legal Brief Narrative UI (Cloud Run)\n• Turn Reasoning & Grounding Citations\n• File Provenance Box (SHA-256 & CRC32C)\n• Inline PDF, HTML Slide, Image & Audio/Video Player\n• NotebookLM Sources, Chat & Studio Modality Viewer"]
+        PV["Microsoft Purview eDiscovery & DSPM for AI (purview_connector.py)\n• Track 1: Custodian Mailbox Folder ('Gemini Enterprise eDiscovery')\n  + MAPI IPM.Note.Google.GeminiEnterprise + Binary fileAttachments\n• Track 2: dataSecurityAndGovernance/processContent (DSPM for AI)"]
     end
 
     R2 -.->|"Enforced on WIF Pool"| User
@@ -90,6 +92,7 @@ flowchart LR
     E --> F
     F -->|"Archive Raw JSON + Binaries"| G
     F -->|"Load Structured Turns + SHA-256/CRC32C"| H
+    F -.->|"Sync Turns + Binary Attachments"| PV
     G -->|"HTTP Range Media Proxy (/api/media)"| UI
     H -->|"Parameterized SQL (/api/logs & /api/search)"| UI
 ```
@@ -110,6 +113,9 @@ flowchart LR
 6. **Self-Contained Compliance & Legal Brief Narrative Review Portal (`portal/`, `deploy_portal.py`)**:
    - Deploys a single self-contained Cloud Run service (`ge-ediscovery-portal`, `--no-allow-unauthenticated`) that serves both the compiled React 18 Legal Brief Narrative SPA (`portal/dist`) and the Python BigQuery/GCS API (`portal/server.py`) with zero Firebase project setup required.
    - Features side-by-side **Session Metadata**, **Turn Reasoning (`thought_text`)**, **File Provenance Box** (`SHA-256 Integrity`, `CRC32C Integrity`, `GCS Archive Path`, `Original File ID`, `MIME Type`, `Size`), inline PDF / HTML Slide Deck / Image / Audio / Video playback (with HTTP `206 Partial Content` `Range` streaming), and dedicated **NotebookLM Enterprise** tabs (**Sources**, **Chat**, and **Studio**).
+7. **Microsoft Purview eDiscovery & DSPM for AI Connector (`purview_connector.py`)**:
+   - **Track 1 — Purview eDiscovery Custodian Mailbox Substrate**: Automatically resolves Entra ID UPNs or Object ID GUIDs (`google.subject = assertion.oid`), creates a dedicated `Gemini Enterprise eDiscovery` compliance folder in the custodian's Exchange Online mailbox, deduplicates via `internetMessageId` (`<ge-ediscovery-{engine_id}-{session_id}-turn-{turn_index}@gemini.cloud.google.com>`), stamps MAPI `PidTagMessageClass` (`String 0x001A` = `IPM.Note.Google.GeminiEnterprise`) and `X-GE-*` headers, renders a self-contained HTML Legal Brief (Prompt + Thought Trace + Response + SHA-256/CRC32C table), and attaches raw binary files (`#microsoft.graph.fileAttachment`) fetched directly from Cloud Storage.
+   - **Track 2 — Microsoft Purview DSPM for AI & Audit (`processContent` API)**: Calls `POST /v1.0/users/{upn}/dataSecurityAndGovernance/processContent` with `#microsoft.graph.processConversationMetadata` (`uploadText` for user prompt, `downloadText` for model response, `accessedResources_v2` for file URIs).
 
 ---
 
@@ -143,6 +149,7 @@ Enabling `observabilityConfig` on a Gemini Enterprise **Engine** only enables lo
 | [`deploy_cloudrun_harvester.py`](./deploy_cloudrun_harvester.py) | Deploys the `ge-ediscovery-harvester` Cloud Run service, least-privilege SA (`ge-ediscovery-harvester-sa`), Cloud Logging $\rightarrow$ Pub/Sub sink (`ge-ediscovery-pubsub-sink`), OIDC push subscription, and dead-letter queue (`ge-ediscovery-dlq` / `ge-ediscovery-dlq-hold`) |
 | [`portal/`](./portal/) | Self-contained **Compliance & Legal Brief Review Portal** (`portal/server.py` Python BigQuery/GCS API server + React 18 / Vite / Tailwind CSS Legal Brief Narrative UI + multi-stage `portal/Dockerfile`) |
 | [`deploy_portal.py`](./deploy_portal.py) | Builds and deploys the `ge-ediscovery-portal` Cloud Run service (`--no-allow-unauthenticated`) serving both the React 18 Compliance Review UI and `/api/*` endpoints |
+| [`purview_connector.py`](./purview_connector.py) | Dual-track **Microsoft Purview eDiscovery & DSPM for AI Connector** (pushes HTML Legal Briefs + binary `#microsoft.graph.fileAttachment` payloads into Exchange Online `Gemini Enterprise eDiscovery` custodian folders and calls `dataSecurityAndGovernance/processContent`) |
 | [`setup_no_delete_role.py`](./setup_no_delete_role.py) | Provisions the `projects/<PROJECT_ID>/roles/geUserNoDelete` custom IAM role (`roles/discoveryengine.user` minus `discoveryengine.sessions.delete` and `discoveryengine.sessions.removeContextFile`) and safely swaps a target principal with automatic IAM backup & `--rollback` |
 | [`sync_no_delete_role.py`](./sync_no_delete_role.py) | Compares `roles/discoveryengine.user` against `geUserNoDelete` to detect and sync newly added Google permissions while blocking any explicit or heuristic session/conversation delete permissions |
 | [`scripts/swap-user-role.sh`](./scripts/swap-user-role.sh) | CLI wrapper to dry-run, `--apply`, or `--rollback` the `geUserNoDelete` role swap for a Workforce Identity Pool or group principal |
@@ -312,6 +319,35 @@ python3 test_ge_ediscovery_e2e.py \
   --engine-id "$GE_ENGINE_ID" \
   --user-subject "$TEST_WIF_USER_SUBJECT"
 ```
+
+---
+
+### Step 9: (Optional) Sync Gemini Enterprise Turns & Binary Attachments to Microsoft Purview eDiscovery (`purview_connector.py`)
+
+For enterprises using **Microsoft Purview eDiscovery (Standard / Premium)** and **Purview DSPM for AI**, `purview_connector.py` pushes harvested Gemini Enterprise turns, reasoning traces (`thought_text`), and raw binary files (`USER_PROVIDED` uploads and `AI_GENERATED` PDFs/images/slides) into Microsoft 365 via two parallel Microsoft Graph tracks:
+- **Track 1 — Purview eDiscovery Custodian Mailbox Substrate**: Writes an immutable, deduplicated item (`internetMessageId: <ge-ediscovery-{engine_id}-{session_id}-turn-{turn_index}@gemini.cloud.google.com>`) into the custodian's Exchange Online `Gemini Enterprise eDiscovery` folder with MAPI `PidTagMessageClass` (`0x001A` = `IPM.Note.Google.GeminiEnterprise`), searchable `X-GE-*` headers, a self-contained HTML Legal Brief body, and raw binary `#microsoft.graph.fileAttachment` payloads fetched from Cloud Storage.
+- **Track 2 — Microsoft Purview DSPM for AI (`processContent`)**: Calls `POST /v1.0/users/{upn}/dataSecurityAndGovernance/processContent` with `#microsoft.graph.processConversationMetadata` (`uploadText` for user prompt, `downloadText` for model response, and `accessedResources_v2` for file URIs).
+
+```bash
+# 1. Authenticate interactively via OAuth 2.0 Device Code flow (or set MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET for daemon mode):
+python3 purview_connector.py \
+  --project-id "$GCP_PROJECT_ID" \
+  --tenant-id "$MS_TENANT_ID" \
+  --device-login \
+  --limit 25
+
+# 2. Sync turns from a specific Gemini Enterprise engine to a target M365 custodian mailbox:
+python3 purview_connector.py \
+  --project-id "$GCP_PROJECT_ID" \
+  --engine-id "$GE_ENGINE_ID" \
+  --target-custodian-upn "custodian@your-tenant.onmicrosoft.com" \
+  --limit 50
+```
+
+Once synced (or streamed automatically by `ge_harvest.py` when `MS_TENANT_ID` credentials are configured), compliance investigators can search, place legal holds on, and add Gemini Enterprise interactions directly into **Purview eDiscovery Review Sets** (`https://purview.microsoft.com/ediscovery/cases`) using KQL queries such as:
+- All Gemini Enterprise turns: `"Gemini Enterprise eDiscovery"`
+- Specific Session ID: `"<SESSION_ID>"`
+- Turns with binary PDF/image attachments: `"Gemini Enterprise eDiscovery" AND HasAttachment:true`
 
 ---
 

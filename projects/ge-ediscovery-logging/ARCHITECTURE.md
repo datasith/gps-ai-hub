@@ -161,6 +161,17 @@ Each file record written into `conversation_turns.files` in BigQuery includes bo
 - `GET /api/search?q=<QUERY>&source=all|ge_core|notebooks`: Executes parameterized BigQuery `UNNEST(files)` / substring searches across prompts, responses, reasoning traces, and file names without SQL injection risk.
 - `GET /api/media?uri=gs://<BUCKET>/<OBJECT>`: Enforces strict bucket allowlisting (`gs://<PROJECT_ID>-ge-ediscovery/`), resolves missing file extensions, and streams binary PDFs, images, HTML slide decks, audio overviews, and video overviews directly from Cloud Storage with HTTP `Range` (`206 Partial Content`) support for browser media scrubbing.
 
+### 2.3 Microsoft Purview eDiscovery & DSPM for AI Integration (`purview_connector.py`)
+When `purview_connector.py` is configured (either via Entra App Registration `MS_TENANT_ID` + `MS_CLIENT_ID` + `MS_CLIENT_SECRET` or OAuth 2.0 Device Code refresh token), `ge_harvest.py` (or standalone `python3 purview_connector.py`) forwards every harvested turn to Microsoft 365 via two Graph tracks:
+
+1. **Track 1 — Exchange Online Custodian Substrate (`push_turn_to_purview_ediscovery_mailbox`)**:
+   - **UUID-to-UPN Resolution (`resolve_custodian_upn`)**: Automatically resolves Workforce Identity `user_iam_principal` values whether the OIDC provider maps `google.subject` to an email UPN (`assertion.upn`) or an Entra Object ID GUID (`assertion.oid`, resolved via `/v1.0/users/{uuid}` or `PURVIEW_TARGET_CUSTODIAN_UPN`).
+   - **Dedicated Compliance Folder & Idempotent Deduplication**: Ensures a `Gemini Enterprise eDiscovery` folder exists in the custodian's mailbox (`GET/POST /v1.0/users/{upn}/mailFolders`) and checks `internetMessageId eq '<ge-ediscovery-{engine_id}-{session_id}-turn-{turn_index}@gemini.cloud.google.com>'` before inserting so repeated sweeps never create duplicate items.
+   - **MAPI Extended Properties & Custom Headers**: Stamps `singleValueExtendedProperties` (`String 0x001A` = `IPM.Note.Google.GeminiEnterprise`, `SystemTime 0x0E06` = `event_timestamp`, `Integer 0x0E07` = `1` sent/read state) and `internetMessageHeaders` (`X-GE-Engine-ID`, `X-GE-Session-ID`, `X-GE-Turn-Index`, `X-GE-Custodian-Principal`, `X-GE-Model-Name`, `X-GE-GCS-Transcript-URI`).
+   - **HTML Legal Brief + Native Binary `#microsoft.graph.fileAttachment` Payloads**: Renders the full prompt, internal reasoning trace (`thought_text`), model response, and SHA-256/CRC32C chain-of-custody table into the HTML body, and downloads each `USER_PROVIDED` and `AI_GENERATED` binary file from Cloud Storage to attach directly as a `#microsoft.graph.fileAttachment` (`contentBytes`, `contentType`, `name`). In **Purview eDiscovery Review Sets**, reviewers can inspect the HTML Legal Brief and preview/download attached PDFs and images side-by-side.
+2. **Track 2 — Purview DSPM for AI & Audit (`push_turn_to_purview_process_content`)**:
+   - Invokes `POST https://graph.microsoft.com/v1.0/users/{upn}/dataSecurityAndGovernance/processContent` with `#microsoft.graph.processConversationMetadata`, submitting the user prompt (`activity: "uploadText"`), model response (`activity: "downloadText"`), `sequenceNumber`, `isTruncated: false`, and `accessedResources_v2` (mapping every attached GCS file URI, status, and policy action).
+
 ---
 
 ## 3. Architectural Considerations, Edge Cases & Production Hardening

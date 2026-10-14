@@ -70,7 +70,18 @@ def get_gcp_access_token() -> str:
     except Exception:
         pass
 
-    token = subprocess.check_output(["gcloud", "auth", "print-access-token"]).decode("utf-8").strip()
+    try:
+        token = subprocess.check_output(
+            ["gcloud", "auth", "print-access-token"],
+            stdin=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=8,
+        ).decode("utf-8").strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(
+            "Local gcloud credentials have expired (Reauthentication required). "
+            "Run `gcloud auth login` in your terminal to refresh your cloudtop session."
+        ) from e
     _GCP_TOKEN_CACHE["default"] = (token, now + 300)
     return token
 

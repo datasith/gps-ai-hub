@@ -952,6 +952,14 @@ def load_rows_to_bigquery(rows: list[dict], project_id: str) -> None:
     table_ref = f"{project_id}:{BQ_DATASET}.{BQ_TABLE}"
     print(f"\n[+] Successfully loaded {len(rows)} turn row(s) across {len(session_ids)} session(s) into {table_ref}!")
 
+    try:
+        import purview_connector
+        if purview_connector.is_purview_configured():
+            print("[*] Forwarding harvested turn(s) and binary attachments to Microsoft Purview eDiscovery...")
+            purview_connector.forward_turns_to_purview(rows, gcp_token=gcp_token, project_id=project_id)
+    except Exception as e:
+        print(f"  [!] Microsoft Purview forwarding warning: {e}")
+
 
 def clean_notebooklm_streamed_reply(text: str) -> str:
     """
