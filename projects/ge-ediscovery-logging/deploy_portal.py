@@ -36,6 +36,8 @@ def main() -> None:
     parser.add_argument("--bucket-name", default="", help="GCS compliance archive bucket (default: <project_id>-ge-ediscovery)")
     parser.add_argument("--bq-dataset", default="ge_ediscovery", help="BigQuery dataset name (default: ge_ediscovery)")
     parser.add_argument("--reviewer-email", default="", help="Optional default reviewer email shown in portal header")
+    parser.add_argument("--iap", action="store_true", help="Enable native Cloud Run Identity-Aware Proxy (IAP) for direct browser Google Sign-In")
+    parser.add_argument("--iap-accessor", default="", help="Optional IAM principal to grant roles/iap.httpsResourceAccessor (e.g. domain:example.com or user:reviewer@example.com)")
     args = parser.parse_args()
 
     if not args.project_id:
@@ -73,7 +75,7 @@ def main() -> None:
     print("======================================================================")
     print(f"Deploying Compliance Review Portal ({args.service_name}) to Cloud Run")
     print("======================================================================")
-    run_cmd([
+    deploy_cmd = [
         "gcloud", "run", "deploy", args.service_name,
         f"--project={args.project_id}",
         f"--region={args.region}",
@@ -84,7 +86,22 @@ def main() -> None:
         "--memory=512Mi",
         "--cpu=1",
         "--quiet",
-    ])
+    ]
+    if args.iap:
+        run_cmd(["gcloud", "services", "enable", "iap.googleapis.com", f"--project={args.project_id}"])
+        deploy_cmd.append("--iap")
+    run_cmd(deploy_cmd)
+
+    if args.iap and args.iap_accessor:
+        run_cmd([
+            "gcloud", "iap", "web", "add-iam-policy-binding",
+            f"--project={args.project_id}",
+            "--resource-type=cloud-run",
+            f"--service={args.service_name}",
+            f"--region={args.region}",
+            f"--member={args.iap_accessor}",
+            "--role=roles/iap.httpsResourceAccessor",
+        ])
 
     service_url = run_cmd([
         "gcloud", "run", "services", "describe", args.service_name,
