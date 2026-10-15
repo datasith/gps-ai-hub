@@ -25,5 +25,9 @@ resource "google_storage_bucket" "logs_data_bucket" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
+  versioning {
+    enabled = true
+  }
+
   depends_on = [resource.google_project_service.services]
 }

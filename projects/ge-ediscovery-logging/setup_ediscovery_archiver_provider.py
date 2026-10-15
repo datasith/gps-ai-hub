@@ -137,8 +137,20 @@ def ensure_kms_key_and_jwks() -> None:
 
 def ensure_oidc_provider() -> None:
     issuer_uri = f"https://ediscovery.{PROJECT_ID}.internal"
-    attr_condition = f"assertion.iss == '{issuer_uri}' && assertion.aud == '{CLIENT_ID}' && assertion.sub != ''"
-    print(f"[4/4] Ensuring OIDC provider '{PROVIDER_ID}' in workforce pool '{WORKFORCE_POOL_ID}'...")
+    # Mitigates C2: Require explicit `purpose == 'ediscovery_harvest'` claim, block service account subjects,
+    # and support an optional CEL allowlist of licensed Gemini Enterprise users (`ARCHIVER_ALLOWED_SUBJECTS_CEL`).
+    attr_condition = (
+        f"assertion.iss == '{issuer_uri}' "
+        f"&& assertion.aud == '{CLIENT_ID}' "
+        f"&& assertion.purpose == 'ediscovery_harvest' "
+        f"&& assertion.sub != '' "
+        f"&& !(assertion.sub.endsWith('.gserviceaccount.com'))"
+    )
+    allowed_subjects_cel = os.environ.get("ARCHIVER_ALLOWED_SUBJECTS_CEL", "").strip()
+    if allowed_subjects_cel:
+        attr_condition = f"({attr_condition}) && ({allowed_subjects_cel})"
+
+    print(f"[4/5] Ensuring OIDC provider '{PROVIDER_ID}' in workforce pool '{WORKFORCE_POOL_ID}'...")
     desc = subprocess.run(
         [
             "gcloud", "iam", "workforce-pools", "providers", "describe",
@@ -192,10 +204,95 @@ def ensure_oidc_provider() -> None:
     print(f"Done! OIDC provider locations/global/workforcePools/{WORKFORCE_POOL_ID}/providers/{PROVIDER_ID} is ACTIVE and backed by Cloud KMS.")
 
 
+def ensure_kms_key_iam_and_monitoring() -> None:
+    """
+    Mitigates C2:
+      1. Locks down key-level IAM on `ediscovery-archiver-jwt-key` so ONLY `ge-ediscovery-harvester-sa`
+         holds `roles/cloudkms.signerVerifier` at the key level.
+      2. Provisions a Cloud Logging log-based metric (`ediscovery_kms_asymmetric_sign_calls`)
+         tracking every `AsymmetricSign` invocation on `ediscovery-archiver-jwt-key` for audit alerting.
+    """
+    harvester_sa = f"ge-ediscovery-harvester-sa@{PROJECT_ID}.iam.gserviceaccount.com"
+    print(f"[5/5] Locking down Cloud KMS key IAM to '{harvester_sa}' and configuring AsymmetricSign monitoring...")
+    sa_check = subprocess.run(
+        ["gcloud", "iam", "service-accounts", "describe", harvester_sa, f"--project={PROJECT_ID}"],
+        capture_output=True,
+        text=True,
+    )
+    if sa_check.returncode == 0:
+        with tempfile.NamedTemporaryFile("w+", suffix=".json", delete=False) as tf:
+            policy_path = tf.name
+            json.dump(
+                {
+                    "bindings": [
+                        {
+                            "role": "roles/cloudkms.signerVerifier",
+                            "members": [f"serviceAccount:{harvester_sa}"],
+                        }
+                    ]
+                },
+                tf,
+            )
+        try:
+            subprocess.run(
+                [
+                    "gcloud", "kms", "keys", "set-iam-policy", KMS_KEY,
+                    policy_path,
+                    f"--keyring={KMS_KEYRING}",
+                    f"--location={KMS_LOCATION}",
+                    f"--project={PROJECT_ID}",
+                    "--quiet",
+                ],
+                check=True,
+            )
+        finally:
+            if os.path.exists(policy_path):
+                os.remove(policy_path)
+
+    metric_name = "ediscovery_kms_asymmetric_sign_calls"
+    metric_filter = (
+        'resource.type="cloudkms_cryptokeyversion" '
+        'AND protoPayload.serviceName="cloudkms.googleapis.com" '
+        'AND protoPayload.methodName="AsymmetricSign" '
+        f'AND protoPayload.resourceName:"{KMS_KEY}"'
+    )
+    m_check = subprocess.run(
+        ["gcloud", "logging", "metrics", "describe", metric_name, f"--project={PROJECT_ID}"],
+        capture_output=True,
+        text=True,
+    )
+    if m_check.returncode == 0:
+        subprocess.run(
+            [
+                "gcloud", "logging", "metrics", "update", metric_name,
+                "--description=Tracks every Cloud KMS AsymmetricSign call on the eDiscovery Archiver JWT key",
+                f"--log-filter={metric_filter}",
+                f"--project={PROJECT_ID}",
+            ],
+            check=True,
+        )
+    else:
+        subprocess.run(
+            [
+                "gcloud", "logging", "metrics", "create", metric_name,
+                "--description=Tracks every Cloud KMS AsymmetricSign call on the eDiscovery Archiver JWT key",
+                f"--log-filter={metric_filter}",
+                f"--project={PROJECT_ID}",
+            ],
+            check=True,
+        )
+    print(f"      Cloud Logging metric '{metric_name}' configured for AsymmetricSign audit alerting.")
+
+
 if __name__ == "__main__":
     if not PROJECT_ID or PROJECT_ID.startswith("<"):
         sys.exit("ERROR: Please set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
     if not WORKFORCE_POOL_ID or WORKFORCE_POOL_ID.startswith("<"):
         sys.exit("ERROR: Please set WORKFORCE_POOL_ID (e.g., export WORKFORCE_POOL_ID='your-workforce-pool-id').")
-    ensure_kms_key_and_jwks()
-    ensure_oidc_provider()
+    try:
+        ensure_kms_key_and_jwks()
+        ensure_oidc_provider()
+        ensure_kms_key_iam_and_monitoring()
+    finally:
+        if os.path.exists(JWKS_PATH):
+            os.remove(JWKS_PATH)

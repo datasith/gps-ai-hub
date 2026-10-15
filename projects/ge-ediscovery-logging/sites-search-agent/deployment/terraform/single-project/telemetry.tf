@@ -12,14 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# BigQuery dataset for telemetry external tables
+# BigQuery dataset for telemetry external tables (mitigates M10: explicit least-privilege access & deletion protection)
 resource "google_bigquery_dataset" "telemetry_dataset" {
-  project       = var.project_id
-  dataset_id    = replace("${var.project_name}_telemetry", "-", "_")
-  friendly_name = "${var.project_name} Telemetry"
-  location      = var.region
-  description   = "Dataset for GenAI telemetry data stored in GCS"
-  depends_on    = [google_project_service.services]
+  project                    = var.project_id
+  dataset_id                 = replace("${var.project_name}_telemetry", "-", "_")
+  friendly_name              = "${var.project_name} Telemetry"
+  location                   = var.region
+  description                = "Dataset for GenAI telemetry data stored in GCS"
+  delete_contents_on_destroy = false
+
+  access {
+    role          = "OWNER"
+    special_group = "projectOwners"
+  }
+
+  access {
+    role          = "READER"
+    user_by_email = google_service_account.app_sa.email
+  }
+
+  depends_on = [google_project_service.services]
 }
 
 # BigQuery connection for accessing GCS telemetry data
@@ -89,7 +101,7 @@ resource "google_bigquery_table" "completions_external_table" {
   project             = var.project_id
   dataset_id          = google_bigquery_dataset.telemetry_dataset.dataset_id
   table_id            = "completions"
-  deletion_protection = false
+  deletion_protection = true
 
   external_data_configuration {
     autodetect            = false
@@ -143,7 +155,7 @@ resource "google_bigquery_table" "genai_logs_table" {
   project             = var.project_id
   dataset_id          = google_bigquery_dataset.telemetry_dataset.dataset_id
   table_id            = "aiplatform_googleapis_com_reasoning_engine_stdout"
-  deletion_protection = false
+  deletion_protection = true
   description         = "GenAI inference logs exported directly from Cloud Logging"
 
   time_partitioning {
@@ -171,7 +183,7 @@ resource "google_bigquery_table" "completions_view" {
   dataset_id          = google_bigquery_dataset.telemetry_dataset.dataset_id
   table_id            = "completions_view"
   description         = "View of GenAI completion logs joined with the GCS prompt/response external table"
-  deletion_protection = false
+  deletion_protection = true
 
   view {
     query = templatefile("${path.module}/../shared/completions.sql", {

@@ -69,7 +69,7 @@ def main() -> None:
             f"--project={args.project_id}",
         ])
 
-    # Grant strictly read-only permissions on GCS archive bucket and BigQuery (no KMS signing or write roles)
+    # Grant strictly read-only permissions on GCS archive bucket and BigQuery (no KMS signing or logWriter roles; mitigates N3)
     run_cmd([
         "gcloud", "storage", "buckets", "add-iam-policy-binding", f"gs://{bucket_name}",
         f"--member=serviceAccount:{sa_email}",
@@ -79,7 +79,6 @@ def main() -> None:
     for role in [
         "roles/bigquery.dataViewer",
         "roles/bigquery.jobUser",
-        "roles/logging.logWriter",
     ]:
         run_cmd([
             "gcloud", "projects", "add-iam-policy-binding", args.project_id,

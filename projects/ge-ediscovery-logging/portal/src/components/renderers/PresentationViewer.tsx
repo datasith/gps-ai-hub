@@ -26,6 +26,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import DOMPurify from 'dompurify';
 import type { ThemeConfig } from '../../types/theme';
 import { getDirectMediaUrl, getCleanExtension } from '../../services/complianceApi';
 import {
@@ -303,13 +304,18 @@ function useElementSize<T extends HTMLElement>(): [React.RefObject<T>, Size] {
 
 const BLOCKED_TAGS = new Set([
   'SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM', 'INPUT', 'BUTTON',
-  'SVG', 'FOREIGNOBJECT', 'MATH', 'STYLE', 'TEMPLATE',
+  'SVG', 'FOREIGNOBJECT', 'MATH', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'NOEMBED', 'NOFRAMES',
+  'XMP', 'PLAINTEXT', 'TITLE', 'TEXTAREA', 'MARQUEE', 'APPLET',
 ]);
 
-/** Strips executable vectors from untrusted deck markup before injection. */
+/** Strips executable and mutation-XSS vectors from untrusted deck markup before injection (mitigates H2 & N5). */
 function sanitizeHtml(html: string): string {
   if (!html) return '';
-  const doc = new DOMParser().parseFromString(`<div id="ge-root">${html}</div>`, 'text/html');
+  const purified = DOMPurify.sanitize(html, {
+    FORBID_TAGS: Array.from(BLOCKED_TAGS).map((t) => t.toLowerCase()),
+    FORBID_ATTR: ['style', 'srcdoc', 'formaction', 'action', 'xlink:href'],
+  });
+  const doc = new DOMParser().parseFromString(`<div id="ge-root">${purified}</div>`, 'text/html');
   const root = doc.getElementById('ge-root');
   if (!root) return '';
 

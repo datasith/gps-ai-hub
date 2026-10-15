@@ -59,12 +59,12 @@ SSL_CTX = (
 _GRAPH_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 _FOLDER_ID_CACHE: dict[str, str] = {}
 TOKEN_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".purview_token_cache.json")
-FIRST_PARTY_OFFICE_CLIENT_ID = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
 
 
 def _write_token_cache_secure(data: dict[str, str]) -> None:
-    """Atomically writes the local developer token cache with mode 0600 from creation."""
+    """Atomically writes the local developer token cache with mode 0600 enforced via os.fchmod (mitigates M5)."""
     fd = os.open(TOKEN_CACHE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
 
@@ -87,13 +87,19 @@ def is_purview_configured() -> bool:
     return bool(cached.get("tenant_id") and cached.get("client_id") and cached.get("refresh_token"))
 
 
-def run_device_code_login(tenant_id: str, client_id: str = FIRST_PARTY_OFFICE_CLIENT_ID) -> str:
-    """Runs OAuth 2.0 Device Code flow against Microsoft Entra ID and caches the refresh_token."""
+def run_device_code_login(tenant_id: str, client_id: str = "") -> str:
+    """Runs OAuth 2.0 Device Code flow against Microsoft Entra ID using an explicit app registration client_id."""
+    c_id = (client_id or MS_CLIENT_ID).strip()
+    if not c_id:
+        raise RuntimeError(
+            "An explicit Microsoft Entra ID App Registration client_id (MS_CLIENT_ID or --client-id) "
+            "is required for OAuth 2.0 Device Code authentication."
+        )
     dc_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/devicecode"
     scope = "https://graph.microsoft.com/.default offline_access"
     req = urllib.request.Request(
         dc_url,
-        data=urllib.parse.urlencode({"client_id": client_id, "scope": scope}).encode("utf-8"),
+        data=urllib.parse.urlencode({"client_id": c_id, "scope": scope}).encode("utf-8"),
         method="POST",
     )
     with urllib.request.urlopen(req, context=SSL_CTX, timeout=15) as resp:
@@ -114,7 +120,7 @@ def run_device_code_login(tenant_id: str, client_id: str = FIRST_PARTY_OFFICE_CL
         time.sleep(interval)
         poll_form = urllib.parse.urlencode({
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "client_id": client_id,
+            "client_id": c_id,
             "device_code": device_code,
         }).encode("utf-8")
         try:
@@ -130,7 +136,7 @@ def run_device_code_login(tenant_id: str, client_id: str = FIRST_PARTY_OFFICE_CL
                     _write_token_cache_secure(
                         {
                             "tenant_id": tenant_id,
-                            "client_id": client_id,
+                            "client_id": c_id,
                             "refresh_token": refresh_token,
                         }
                     )
@@ -820,6 +826,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--session-id", default="", help="Optional specific session ID to push to Purview")
     parser.add_argument("--tenant-id", default=MS_TENANT_ID, help="Microsoft Entra ID Tenant ID")
+    parser.add_argument("--client-id", default=MS_CLIENT_ID, help="Microsoft Entra ID App Registration Client ID")
     parser.add_argument("--target-custodian-upn", default=PURVIEW_TARGET_CUSTODIAN_UPN, help="Optional target M365 custodian mailbox UPN")
     parser.add_argument("--device-login", action="store_true", help="Authenticate interactively via https://login.microsoft.com/device")
     parser.add_argument("--limit", type=int, default=25, help="Max turns to sync from BigQuery (default: 25)")
@@ -834,10 +841,10 @@ if __name__ == "__main__":
 
     graph_tok = ""
     if args.device_login:
-        if not args.tenant_id:
-            print("Error: --tenant-id (or MS_TENANT_ID) is required with --device-login.")
+        if not args.tenant_id or not args.client_id:
+            print("Error: --tenant-id (or MS_TENANT_ID) and --client-id (or MS_CLIENT_ID) are required with --device-login.")
             raise SystemExit(1)
-        graph_tok = run_device_code_login(args.tenant_id)
+        graph_tok = run_device_code_login(args.tenant_id, args.client_id)
 
     import subprocess
     gcp_tok = subprocess.check_output(

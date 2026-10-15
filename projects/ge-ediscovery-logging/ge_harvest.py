@@ -34,8 +34,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
+PROJECT_NUMBER = os.environ.get("GCP_PROJECT_NUMBER", "")
 WORKFORCE_POOL_ID = os.environ.get("WORKFORCE_POOL_ID", "")
 PROVIDER_ID = os.environ.get("ARCHIVER_PROVIDER_ID", "ediscovery-archiver")
 CLIENT_ID = os.environ.get("ARCHIVER_CLIENT_ID", "ediscovery-archiver")
@@ -264,10 +266,11 @@ def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str
     """
     Mints an OAuth2 access token for the given WIF subject via STS token exchange
     backed exclusively by Google Cloud KMS asymmetricSign (zero private keys on disk).
+    Requests a narrow Discovery Engine scope (mitigates C2) and short 15-minute expiry.
     """
     if "/subject/" in subject:
         subject = subject.split("/subject/", 1)[1].strip()
-    if not subject or len(subject) > 256:
+    if not subject or len(subject) > 256 or subject.endswith(".gserviceaccount.com"):
         raise ValueError("Invalid WIF subject for STS token exchange")
     now = int(time.time())
     cached = _STS_TOKEN_CACHE.get(subject)
@@ -279,8 +282,9 @@ def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str
         "iss": get_issuer_uri(project_id),
         "sub": subject,
         "aud": CLIENT_ID,
+        "purpose": "ediscovery_harvest",
         "iat": now - 60,
-        "exp": now + 3600,
+        "exp": now + 900,
     }
     signing_input = (
         f"{b64url_encode(json.dumps(header).encode('utf-8'))}."
@@ -293,7 +297,7 @@ def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str
     sts_body = urllib.parse.urlencode({
         "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
         "audience": f"//iam.googleapis.com/locations/global/workforcePools/{workforce_pool_id}/providers/{PROVIDER_ID}",
-        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "scope": "https://www.googleapis.com/auth/discoveryengine.readwrite https://www.googleapis.com/auth/discoveryengine.assist.readwrite",
         "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
         "subject_token": jwt_token,
         "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
@@ -309,7 +313,7 @@ def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str
     with urllib.request.urlopen(req, context=SSL_CTX) as resp:
         data = json.loads(resp.read().decode("utf-8"))
         token = data["access_token"]
-        expires_in = float(data.get("expires_in", 3600))
+        expires_in = min(float(data.get("expires_in", 900)), 900.0)
         _STS_TOKEN_CACHE[subject] = (token, now + expires_in)
         return token
 
@@ -431,27 +435,69 @@ def discover_from_cloud_logging(project_id: str, hours: int = 72, extra_filter: 
     return sessions
 
 
+_PROJECT_NUMBER_CACHE: dict[str, str] = {}
+
+
+def _is_allowed_project_segment(proj_seg: str) -> bool:
+    """
+    Verifies that the `projects/<proj_seg>` segment in a Discovery Engine resource name
+    belongs to the configured `PROJECT_ID` (either its project ID or its numeric project number).
+    Mitigates C1 residual (cross-project resource path injection).
+    """
+    if not PROJECT_ID:
+        return True
+    allowed = {PROJECT_ID}
+    if PROJECT_NUMBER:
+        allowed.add(PROJECT_NUMBER)
+    if proj_seg in allowed:
+        return True
+    if proj_seg.isdigit():
+        cached_num = _PROJECT_NUMBER_CACHE.get(PROJECT_ID)
+        if cached_num is None:
+            try:
+                gcp_token = get_gcp_access_token()
+                req = urllib.request.Request(
+                    f"https://cloudresourcemanager.googleapis.com/v1/projects/{PROJECT_ID}",
+                    headers={"Authorization": f"Bearer {gcp_token}"},
+                )
+                with urllib.request.urlopen(req, context=SSL_CTX, timeout=5) as resp:
+                    pdata = json.loads(resp.read().decode("utf-8"))
+                    cached_num = str(pdata.get("projectNumber") or "")
+            except Exception:
+                cached_num = ""
+            _PROJECT_NUMBER_CACHE[PROJECT_ID] = cached_num
+        if cached_num and proj_seg == cached_num:
+            return True
+    return False
+
+
 def parse_session_resource(session_name: str) -> tuple[str, str, str]:
     """
-    Validates a full session resource name against SESSION_RESOURCE_RE and returns
-    (location, engine_id, session_id). Prevents SSRF / path injection via forged logs (C1).
+    Validates a full session resource name against SESSION_RESOURCE_RE and pins the
+    project segment to PROJECT_ID / PROJECT_NUMBER. Returns (location, engine_id, session_id).
+    Prevents SSRF / cross-project path injection via forged logs (C1).
     """
     m = SESSION_RESOURCE_RE.fullmatch((session_name or "").strip())
     if not m:
         raise ValueError(f"Rejected invalid session resource name: {session_name!r}")
-    _proj, loc, engine_id, session_id = m.group(1), m.group(2), m.group(3), m.group(4)
+    proj, loc, engine_id, session_id = m.group(1), m.group(2), m.group(3), m.group(4)
+    if not _is_allowed_project_segment(proj):
+        raise ValueError(f"Rejected cross-project session resource '{proj}' (expected {PROJECT_ID!r})")
     return loc, engine_id, session_id
 
 
 def parse_notebook_resource(nb_name: str) -> tuple[str, str]:
     """
-    Validates a full notebook resource name against NOTEBOOK_RESOURCE_RE and returns
-    (location, notebook_id). Prevents SSRF / path injection via forged logs (C1).
+    Validates a full notebook resource name against NOTEBOOK_RESOURCE_RE and pins the
+    project segment to PROJECT_ID / PROJECT_NUMBER. Returns (location, notebook_id).
+    Prevents SSRF / cross-project path injection via forged logs (C1).
     """
     m = NOTEBOOK_RESOURCE_RE.fullmatch((nb_name or "").strip())
     if not m:
         raise ValueError(f"Rejected invalid notebook resource name: {nb_name!r}")
-    _proj, loc, nb_id = m.group(1), m.group(2), m.group(3)
+    proj, loc, nb_id = m.group(1), m.group(2), m.group(3)
+    if not _is_allowed_project_segment(proj):
+        raise ValueError(f"Rejected cross-project notebook resource '{proj}' (expected {PROJECT_ID!r})")
     return loc, nb_id
 
 
@@ -871,11 +917,13 @@ def harvest_session(
 
 def load_rows_to_bigquery(rows: list[dict], project_id: str) -> None:
     """
-    Non-destructively upserts rows for the harvested session_ids in BigQuery (mitigates M1):
-      1. Loads the batch into a staging table (`{BQ_TABLE}_staging`) with WRITE_TRUNCATE.
+    Non-destructively upserts rows for the harvested session_ids in BigQuery (mitigates M1 & N4):
+      1. Loads the batch into a unique per-invocation staging table (`{BQ_TABLE}_staging_<uuid>`)
+         so concurrent Cloud Run `/pubsub` workers never race or truncate each other's staged rows (N4).
       2. Executes an atomic DML MERGE into `{BQ_TABLE}` keyed on `(session_id, turn_index)`
-         (preserving any prior turns that a user might have removed, and never leaving a gap
-         if a load job fails).
+         with `WHEN MATCHED AND S.harvested_at >= T.harvested_at THEN UPDATE` so stale/out-of-order
+         events never overwrite newer harvested state.
+      3. Cleans up the per-run staging table inside a `finally:` block.
     """
     if not rows:
         print("No rows to load into BigQuery.")
@@ -886,127 +934,141 @@ def load_rows_to_bigquery(rows: list[dict], project_id: str) -> None:
     if not session_ids:
         return
 
-    staging_table = f"{BQ_TABLE}_staging"
+    staging_table = f"{BQ_TABLE}_staging_{uuid.uuid4().hex[:12]}"
     schema_path = os.path.join(BASE_DIR, "conversation_turns_schema.json")
     schema_fields = []
     if os.path.exists(schema_path):
         with open(schema_path, "r", encoding="utf-8") as sf:
             schema_fields = json.load(sf)
 
-    # 1. Multipart Load Job into staging table via BigQuery REST API
-    boundary = "===============ge_ediscovery_bq_load_boundary=="
-    load_cfg: dict = {
-        "destinationTable": {
-            "projectId": project_id,
-            "datasetId": BQ_DATASET,
-            "tableId": staging_table,
-        },
-        "sourceFormat": "NEWLINE_DELIMITED_JSON",
-        "writeDisposition": "WRITE_TRUNCATE",
-    }
-    if schema_fields:
-        load_cfg["schema"] = {"fields": schema_fields}
+    try:
+        # 1. Multipart Load Job into unique per-run staging table via BigQuery REST API
+        boundary = "===============ge_ediscovery_bq_load_boundary=="
+        load_cfg: dict = {
+            "destinationTable": {
+                "projectId": project_id,
+                "datasetId": BQ_DATASET,
+                "tableId": staging_table,
+            },
+            "sourceFormat": "NEWLINE_DELIMITED_JSON",
+            "writeDisposition": "WRITE_TRUNCATE",
+        }
+        if schema_fields:
+            load_cfg["schema"] = {"fields": schema_fields}
 
-    job_config = {"configuration": {"load": load_cfg}}
-    jsonl_bytes = "".join(json.dumps(r) + "\n" for r in rows).encode("utf-8")
-    multipart_body = (
-        f"--{boundary}\r\n"
-        "Content-Type: application/json; charset=UTF-8\r\n\r\n"
-        f"{json.dumps(job_config)}\r\n"
-        f"--{boundary}\r\n"
-        "Content-Type: application/octet-stream\r\n\r\n"
-    ).encode("utf-8") + jsonl_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        job_config = {"configuration": {"load": load_cfg}}
+        jsonl_bytes = "".join(json.dumps(r) + "\n" for r in rows).encode("utf-8")
+        multipart_body = (
+            f"--{boundary}\r\n"
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            f"{json.dumps(job_config)}\r\n"
+            f"--{boundary}\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8") + jsonl_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
 
-    upload_url = f"https://bigquery.googleapis.com/upload/bigquery/v2/projects/{project_id}/jobs?uploadType=multipart"
-    load_req = urllib.request.Request(
-        upload_url,
-        data=multipart_body,
-        headers={
-            "Authorization": f"Bearer {gcp_token}",
-            "Content-Type": f"multipart/related; boundary={boundary}",
-            "X-Goog-User-Project": project_id,
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(load_req, context=SSL_CTX) as resp:
-        job_data = json.loads(resp.read().decode("utf-8"))
-
-    job_id = job_data.get("jobReference", {}).get("jobId")
-    job_loc = job_data.get("jobReference", {}).get("location", "US")
-    while job_data.get("status", {}).get("state") != "DONE" and job_id:
-        time.sleep(0.5)
-        poll_req = urllib.request.Request(
-            f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/jobs/{job_id}?location={job_loc}",
-            headers={"Authorization": f"Bearer {gcp_token}", "X-Goog-User-Project": project_id},
+        upload_url = f"https://bigquery.googleapis.com/upload/bigquery/v2/projects/{project_id}/jobs?uploadType=multipart"
+        load_req = urllib.request.Request(
+            upload_url,
+            data=multipart_body,
+            headers={
+                "Authorization": f"Bearer {gcp_token}",
+                "Content-Type": f"multipart/related; boundary={boundary}",
+                "X-Goog-User-Project": project_id,
+            },
+            method="POST",
         )
-        with urllib.request.urlopen(poll_req, context=SSL_CTX) as p_resp:
-            job_data = json.loads(p_resp.read().decode("utf-8"))
+        with urllib.request.urlopen(load_req, context=SSL_CTX) as resp:
+            job_data = json.loads(resp.read().decode("utf-8"))
 
-    err_result = job_data.get("status", {}).get("errorResult")
-    if err_result:
-        raise RuntimeError(f"BigQuery staging load job failed: {err_result}")
-
-    # 2. Atomic DML MERGE from staging into destination table (never deletes un-staged rows)
-    merge_url = f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries"
-    merge_sql = f"""
-        MERGE `{project_id}.{BQ_DATASET}.{BQ_TABLE}` AS T
-        USING (
-          SELECT * EXCEPT(rn) FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY session_id, turn_index ORDER BY harvested_at DESC) AS rn
-            FROM `{project_id}.{BQ_DATASET}.{staging_table}`
-          ) WHERE rn = 1
-        ) AS S
-        ON T.session_id = S.session_id AND T.turn_index = S.turn_index
-        WHEN MATCHED THEN UPDATE SET
-          query_id = S.query_id,
-          assist_answer_id = S.assist_answer_id,
-          engine_id = S.engine_id,
-          location = S.location,
-          user_iam_principal = S.user_iam_principal,
-          session_display_name = S.session_display_name,
-          prompt_text = S.prompt_text,
-          response_text = S.response_text,
-          thought_text = S.thought_text,
-          model_name = S.model_name,
-          session_transcript_gcs_uri = S.session_transcript_gcs_uri,
-          session_transcript_console_url = S.session_transcript_console_url,
-          files = S.files,
-          event_timestamp = S.event_timestamp,
-          harvested_at = S.harvested_at
-        WHEN NOT MATCHED THEN INSERT (
-          session_id, turn_index, query_id, assist_answer_id, engine_id, location,
-          user_iam_principal, session_display_name, prompt_text, response_text,
-          thought_text, model_name, session_transcript_gcs_uri,
-          session_transcript_console_url, files, event_timestamp, harvested_at
-        ) VALUES (
-          S.session_id, S.turn_index, S.query_id, S.assist_answer_id, S.engine_id, S.location,
-          S.user_iam_principal, S.session_display_name, S.prompt_text, S.response_text,
-          S.thought_text, S.model_name, S.session_transcript_gcs_uri,
-          S.session_transcript_console_url, S.files, S.event_timestamp, S.harvested_at
-        )
-    """
-    merge_req = urllib.request.Request(
-        merge_url,
-        data=json.dumps({"query": merge_sql, "useLegacySql": False}).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {gcp_token}",
-            "Content-Type": "application/json",
-            "X-Goog-User-Project": project_id,
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(merge_req, context=SSL_CTX) as resp:
-        merge_resp = json.loads(resp.read().decode("utf-8"))
-        m_job_id = merge_resp.get("jobReference", {}).get("jobId")
-        m_job_loc = merge_resp.get("jobReference", {}).get("location", "US")
-        while not merge_resp.get("jobComplete", False) and m_job_id:
+        job_id = job_data.get("jobReference", {}).get("jobId")
+        job_loc = job_data.get("jobReference", {}).get("location", "US")
+        while job_data.get("status", {}).get("state") != "DONE" and job_id:
             time.sleep(0.5)
             poll_req = urllib.request.Request(
-                f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries/{m_job_id}?location={m_job_loc}",
+                f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/jobs/{job_id}?location={job_loc}",
                 headers={"Authorization": f"Bearer {gcp_token}", "X-Goog-User-Project": project_id},
             )
             with urllib.request.urlopen(poll_req, context=SSL_CTX) as p_resp:
-                merge_resp = json.loads(p_resp.read().decode("utf-8"))
+                job_data = json.loads(p_resp.read().decode("utf-8"))
+
+        err_result = job_data.get("status", {}).get("errorResult")
+        if err_result:
+            raise RuntimeError(f"BigQuery staging load job failed: {err_result}")
+
+        # 2. Atomic DML MERGE from per-run staging into destination table (never deletes un-staged rows)
+        merge_url = f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries"
+        merge_sql = f"""
+            MERGE `{project_id}.{BQ_DATASET}.{BQ_TABLE}` AS T
+            USING (
+              SELECT * EXCEPT(rn) FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY session_id, turn_index ORDER BY harvested_at DESC) AS rn
+                FROM `{project_id}.{BQ_DATASET}.{staging_table}`
+              ) WHERE rn = 1
+            ) AS S
+            ON T.session_id = S.session_id AND T.turn_index = S.turn_index
+            WHEN MATCHED AND S.harvested_at >= T.harvested_at THEN UPDATE SET
+              query_id = S.query_id,
+              assist_answer_id = S.assist_answer_id,
+              engine_id = S.engine_id,
+              location = S.location,
+              user_iam_principal = S.user_iam_principal,
+              session_display_name = S.session_display_name,
+              prompt_text = S.prompt_text,
+              response_text = S.response_text,
+              thought_text = S.thought_text,
+              model_name = S.model_name,
+              session_transcript_gcs_uri = S.session_transcript_gcs_uri,
+              session_transcript_console_url = S.session_transcript_console_url,
+              files = S.files,
+              event_timestamp = S.event_timestamp,
+              harvested_at = S.harvested_at
+            WHEN NOT MATCHED THEN INSERT (
+              session_id, turn_index, query_id, assist_answer_id, engine_id, location,
+              user_iam_principal, session_display_name, prompt_text, response_text,
+              thought_text, model_name, session_transcript_gcs_uri,
+              session_transcript_console_url, files, event_timestamp, harvested_at
+            ) VALUES (
+              S.session_id, S.turn_index, S.query_id, S.assist_answer_id, S.engine_id, S.location,
+              S.user_iam_principal, S.session_display_name, S.prompt_text, S.response_text,
+              S.thought_text, S.model_name, S.session_transcript_gcs_uri,
+              S.session_transcript_console_url, S.files, S.event_timestamp, S.harvested_at
+            )
+        """
+        merge_req = urllib.request.Request(
+            merge_url,
+            data=json.dumps({"query": merge_sql, "useLegacySql": False}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {gcp_token}",
+                "Content-Type": "application/json",
+                "X-Goog-User-Project": project_id,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(merge_req, context=SSL_CTX) as resp:
+            merge_resp = json.loads(resp.read().decode("utf-8"))
+            m_job_id = merge_resp.get("jobReference", {}).get("jobId")
+            m_job_loc = merge_resp.get("jobReference", {}).get("location", "US")
+            while not merge_resp.get("jobComplete", False) and m_job_id:
+                time.sleep(0.5)
+                poll_req = urllib.request.Request(
+                    f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries/{m_job_id}?location={m_job_loc}",
+                    headers={"Authorization": f"Bearer {gcp_token}", "X-Goog-User-Project": project_id},
+                )
+                with urllib.request.urlopen(poll_req, context=SSL_CTX) as p_resp:
+                    merge_resp = json.loads(p_resp.read().decode("utf-8"))
+    finally:
+        # 3. Clean up per-invocation staging table via BigQuery tables.delete REST API
+        try:
+            del_url = f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/datasets/{BQ_DATASET}/tables/{staging_table}"
+            del_req = urllib.request.Request(
+                del_url,
+                headers={"Authorization": f"Bearer {gcp_token}", "X-Goog-User-Project": project_id},
+                method="DELETE",
+            )
+            with urllib.request.urlopen(del_req, context=SSL_CTX, timeout=10) as _:
+                pass
+        except Exception:
+            pass
 
     table_ref = f"{project_id}:{BQ_DATASET}.{BQ_TABLE}"
     print(f"\n[+] Successfully merged {len(rows)} turn row(s) across {len(session_ids)} session(s) into {table_ref}!")
@@ -1414,6 +1476,9 @@ def harvest_notebooklm_enterprise(
             clean_reply = clean_notebooklm_streamed_reply(raw_reply)
             nb_info["chat_turns"].append({
                 "query_id": insert_id or f"nb-turn-{len(nb_info['chat_turns']) + 1}",
+                "log_insert_id": insert_id,
+                "receive_timestamp": entry.get("receiveTimestamp") or ts or "",
+                "provenance": "UNVERIFIED_CLOUD_LOGGING_ENTRY",
                 "user_principal": user_principal or nb_info["user_iam_principal"],
                 "prompt_text": user_query,
                 "response_text": clean_reply,
@@ -1433,6 +1498,9 @@ def harvest_notebooklm_enterprise(
             if status_msg and "url:" in status_msg:
                 nb_info["chat_turns"].append({
                     "query_id": insert_id or "nb-src-error",
+                    "log_insert_id": insert_id,
+                    "receive_timestamp": entry.get("receiveTimestamp") or ts or "",
+                    "provenance": "UNVERIFIED_CLOUD_LOGGING_ENTRY",
                     "user_principal": user_principal or nb_info["user_iam_principal"],
                     "prompt_text": f"[NotebookLM BatchCreateSources Failed Ingestion] {status_msg.splitlines()[0]}",
                     "response_text": status_msg,
@@ -1497,17 +1565,20 @@ def harvest_notebooklm_enterprise(
 
         nb_detail = {}
         nb_url = f"https://{host}/v1alpha/{nb_name}"
-        cand_tokens = [tok] if tok else []
+        cand_principals: list[tuple[str, str]] = []
+        if principal and tok:
+            cand_principals.append((principal, tok))
         for fp in FALLBACK_PRINCIPALS:
             try:
                 fp_tok = get_token_for_principal(fp, project_id, workforce_pool_id)
-                if fp_tok and fp_tok not in cand_tokens:
-                    cand_tokens.append(fp_tok)
+                if fp_tok and all(t != fp_tok for _, t in cand_principals):
+                    cand_principals.append((fp, fp_tok))
             except Exception:
                 pass
 
         last_nb_err = None
-        for c_tok in cand_tokens:
+        verified_owner_principal = principal
+        for c_princ, c_tok in cand_principals:
             try:
                 req = urllib.request.Request(
                     nb_url,
@@ -1515,6 +1586,7 @@ def harvest_notebooklm_enterprise(
                 )
                 nb_detail = json.loads(urllib.request.urlopen(req, context=SSL_CTX).read().decode("utf-8"))
                 tok = c_tok
+                verified_owner_principal = c_princ
                 break
             except Exception as e:
                 last_nb_err = e
@@ -1523,6 +1595,22 @@ def harvest_notebooklm_enterprise(
             # Mitigates H1: Reject unverified NotebookLM log entries if notebooks.get cannot confirm ownership/existence
             print(f"  [!] Skipping unverified notebook {nb_id} ({loc}): could not confirm via notebooks.get ({last_nb_err})")
             continue
+
+        principal = verified_owner_principal
+        # Mitigates H1 residual: Filter out any log-sourced chat turns claiming a different userIamPrincipal
+        # than the API-verified notebook owner (`verified_owner_principal`).
+        verified_chat_turns: list[dict] = []
+        for ct in nb_info["chat_turns"]:
+            turn_princ = ct.get("user_principal") or ""
+            if turn_princ and principal and turn_princ != principal:
+                print(
+                    f"  [!] Skipping NotebookLM turn {ct.get('query_id')} on {nb_id}: "
+                    f"log userIamPrincipal '{turn_princ}' does not match verified owner '{principal}'"
+                )
+                continue
+            ct["user_principal"] = principal
+            verified_chat_turns.append(ct)
+        nb_info["chat_turns"] = verified_chat_turns
 
         title = nb_detail.get("title") or nb_info.get("title") or f"Untitled Notebook ({nb_id[:8]})"
         create_time = nb_detail.get("metadata", {}).get("createTime") or nb_info.get("latest_timestamp") or now_iso
@@ -1635,6 +1723,10 @@ def harvest_notebooklm_enterprise(
 
         if nb_info["chat_turns"]:
             for idx, ct in enumerate(nb_info["chat_turns"], start=1):
+                provenance_note = (
+                    f"[PROVENANCE: UNVERIFIED_LOG_SOURCED_TURN | log_insert_id={ct.get('log_insert_id') or 'none'} "
+                    f"| receive_timestamp={ct.get('receive_timestamp') or 'unknown'}]\n{thought_summary}"
+                )
                 bq_rows.append({
                     "session_id": nb_id,
                     "turn_index": idx,
@@ -1642,11 +1734,11 @@ def harvest_notebooklm_enterprise(
                     "assist_answer_id": ct["query_id"],
                     "engine_id": engine_label,
                     "location": loc,
-                    "user_iam_principal": ct["user_principal"] or principal,
+                    "user_iam_principal": principal,
                     "session_display_name": display_label,
                     "prompt_text": ct["prompt_text"],
                     "response_text": ct["response_text"],
-                    "thought_text": thought_summary,
+                    "thought_text": provenance_note,
                     "model_name": "notebooklm-enterprise",
                     "session_transcript_gcs_uri": archive_gcs_uri,
                     "session_transcript_console_url": archive_console_url,

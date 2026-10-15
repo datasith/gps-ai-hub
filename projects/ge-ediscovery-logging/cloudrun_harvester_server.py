@@ -14,11 +14,66 @@ import base64
 import http.server
 import json
 import os
+import subprocess
+import tempfile
+import time
 import traceback
+import urllib.request
 
 import ge_harvest
 
 MAX_BODY_BYTES = 1_048_576  # 1 MiB
+_GOOGLE_OIDC_CERTS_CACHE: dict[str, object] = {"certs": {}, "expires_at": 0.0}
+
+
+def _fetch_google_oidc_certs() -> dict[str, str]:
+    """Fetches and caches Google's OIDC X.509 PEM certificates keyed by kid."""
+    now = time.time()
+    cached_certs = _GOOGLE_OIDC_CERTS_CACHE.get("certs")
+    if isinstance(cached_certs, dict) and cached_certs and float(_GOOGLE_OIDC_CERTS_CACHE.get("expires_at", 0.0)) > now:
+        return cached_certs
+    req = urllib.request.Request("https://www.googleapis.com/oauth2/v1/certs")
+    with urllib.request.urlopen(req, context=ge_harvest.SSL_CTX, timeout=5) as resp:
+        certs = json.loads(resp.read().decode("utf-8"))
+        if isinstance(certs, dict):
+            _GOOGLE_OIDC_CERTS_CACHE["certs"] = certs
+            _GOOGLE_OIDC_CERTS_CACHE["expires_at"] = now + 3600.0
+            return certs
+    return {}
+
+
+def _verify_rs256_jwt_with_x509_cert(signing_input: bytes, signature: bytes, cert_pem: str) -> bool:
+    """Verifies an RS256 JWT signature against an X.509 PEM certificate using openssl."""
+    with tempfile.NamedTemporaryFile("w", suffix=".crt", delete=False) as cf, tempfile.NamedTemporaryFile(
+        "wb", suffix=".Pub", delete=False
+    ) as pf, tempfile.NamedTemporaryFile("wb", suffix=".sig", delete=False) as sf:
+        cert_path, pub_path, sig_path = cf.name, pf.name, sf.name
+        cf.write(cert_pem)
+        sf.write(signature)
+    try:
+        pub_pem = subprocess.check_output(
+            ["openssl", "x509", "-pubkey", "-noout", "-in", cert_path],
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        with open(pub_path, "wb") as pf_out:
+            pf_out.write(pub_pem)
+        res = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-verify", pub_path, "-signature", sig_path],
+            input=signing_input,
+            capture_output=True,
+            timeout=5,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+    finally:
+        for p in (cert_path, pub_path, sig_path):
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
 
 class HarvesterRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -45,8 +100,9 @@ class HarvesterRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _verify_oidc_caller(self) -> tuple[bool, str]:
         """
-        Verifies the Google-signed OIDC Bearer token sent by Authenticated Pub/Sub Push
-        or Cloud Scheduler when running in Cloud Run (defense-in-depth behind Cloud Run IAM).
+        Cryptographically verifies the Google-signed OIDC Bearer token sent by
+        Authenticated Pub/Sub Push or Cloud Scheduler when running in Cloud Run
+        (defense-in-depth behind Cloud Run IAM; mitigates N1).
         """
         auth_header = self.headers.get("Authorization", "").strip()
         if not auth_header.startswith("Bearer "):
@@ -59,25 +115,66 @@ class HarvesterRequestHandler(http.server.BaseHTTPRequestHandler):
         if len(parts) != 3:
             return False, "Malformed OIDC JWT"
         try:
+            hdr_b64 = parts[0] + "=" * (-len(parts[0]) % 4)
             payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+            sig_b64 = parts[2] + "=" * (-len(parts[2]) % 4)
+            header = json.loads(base64.urlsafe_b64decode(hdr_b64).decode("utf-8"))
             claims = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+            signature = base64.urlsafe_b64decode(sig_b64)
         except Exception:
-            return False, "Unable to decode OIDC JWT claims"
+            return False, "Unable to decode OIDC JWT header, claims, or signature"
+
+        if header.get("alg") != "RS256":
+            return False, f"Unsupported OIDC JWT alg: {header.get('alg')!r}"
+        kid = str(header.get("kid") or "").strip()
+        if not kid:
+            return False, "Missing OIDC JWT kid header"
+
+        now = time.time()
+        exp = float(claims.get("exp") or 0)
+        iat = float(claims.get("iat") or 0)
+        if exp <= now - 30:
+            return False, "Expired OIDC JWT"
+        if iat > now + 120:
+            return False, "OIDC JWT issued in the future"
 
         iss = str(claims.get("iss") or "")
         if iss not in ("https://accounts.google.com", "accounts.google.com"):
             return False, "Untrusted OIDC issuer"
 
+        expected_aud = os.environ.get("EXPECTED_OIDC_AUDIENCE", "").strip()
+        if expected_aud and str(claims.get("aud") or "") != expected_aud:
+            return False, "OIDC audience mismatch"
+
         email = str(claims.get("email") or "").strip()
+        if not email or claims.get("email_verified") is not True:
+            return False, "Missing or unverified email claim in OIDC token"
+
         expected_sa = os.environ.get(
             "EXPECTED_INVOKER_SA",
             f"ge-ediscovery-harvester-sa@{ge_harvest.PROJECT_ID}.iam.gserviceaccount.com"
             if ge_harvest.PROJECT_ID
             else "",
         )
-        if expected_sa and email and email != expected_sa:
+        if expected_sa and email != expected_sa:
             return False, f"Unauthorized invoker principal: {email}"
-        return True, email or "verified-oidc-caller"
+
+        try:
+            certs = _fetch_google_oidc_certs()
+            cert_pem = certs.get(kid, "")
+            if not cert_pem:
+                _GOOGLE_OIDC_CERTS_CACHE["expires_at"] = 0.0
+                certs = _fetch_google_oidc_certs()
+                cert_pem = certs.get(kid, "")
+            if not cert_pem:
+                return False, f"Unknown Google OIDC signing key kid={kid}"
+            signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
+            if not _verify_rs256_jwt_with_x509_cert(signing_input, signature, cert_pem):
+                return False, "Invalid OIDC JWT cryptographic signature"
+        except Exception as exc:
+            return False, f"OIDC certificate verification error: {exc}"
+
+        return True, email
 
     def do_POST(self) -> None:
         ok, caller_info = self._verify_oidc_caller()

@@ -22,6 +22,8 @@ contract. Agent Engine forwards calls to ``/api/reasoning_engine`` (sync) and
 packaged Agent Engine.
 """
 
+import base64
+import hashlib
 import inspect
 import json
 
@@ -33,6 +35,48 @@ from fastapi import FastAPI, HTTPException, Request, encoders, responses
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
 from app.app_utils import services
+
+ALLOWED_STREAMING_METHODS = frozenset({"stream_query", "async_stream_query"})
+ALLOWED_SYNC_METHODS = frozenset(
+    {
+        "query",
+        "async_query",
+        "create_session",
+        "async_create_session",
+        "get_session",
+        "async_get_session",
+        "list_sessions",
+        "async_list_sessions",
+    }
+)
+
+
+def _derive_authenticated_user_id(request: Request) -> str | None:
+    """
+    Derives a deterministic caller user_id from verified IAP or Bearer token claims
+    when present (mitigates M4 session IDOR across users).
+    """
+    iap_email = (request.headers.get("X-Goog-Authenticated-User-Email") or "").strip()
+    if iap_email:
+        if ":" in iap_email:
+            iap_email = iap_email.split(":", 1)[1].strip()
+        if iap_email:
+            return iap_email
+    auth_hdr = (request.headers.get("Authorization") or "").strip()
+    if auth_hdr.startswith("Bearer "):
+        tok = auth_hdr.split(" ", 1)[1].strip()
+        parts = tok.split(".")
+        if len(parts) == 3:
+            try:
+                pad = "=" * (-len(parts[1]) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(parts[1] + pad).decode("utf-8"))
+                sub = str(claims.get("email") or claims.get("sub") or "").strip()
+                if sub:
+                    return sub
+            except Exception:
+                pass
+        return f"token:{hashlib.sha256(tok.encode('utf-8')).hexdigest()[:24]}"
+    return None
 
 
 def _no_op_instrumentor_builder(project_id: str) -> None:
@@ -61,12 +105,13 @@ def attach_reasoning_engine_routes(app: FastAPI) -> None:
             )
             runtime.set_up()
             operations = runtime.register_operations()
-            streaming_methods = set(operations.get("stream", [])) | set(
-                operations.get("async_stream", [])
-            )
-            sync_methods = set(operations.get("", [])) | set(
-                operations.get("async", [])
-            )
+            streaming_methods = (
+                set(operations.get("stream", []))
+                | set(operations.get("async_stream", []))
+            ) & ALLOWED_STREAMING_METHODS
+            sync_methods = (
+                set(operations.get("", [])) | set(operations.get("async", []))
+            ) & ALLOWED_SYNC_METHODS
         return runtime
 
     def resolve_method(class_method: str, *, streaming: bool):
@@ -74,10 +119,24 @@ def attach_reasoning_engine_routes(app: FastAPI) -> None:
         allowed = streaming_methods if streaming else sync_methods
         if class_method not in allowed:
             raise HTTPException(
-                status_code=404,
-                detail=f"Unsupported reasoning_engine method: {class_method!r}",
+                status_code=403,
+                detail=f"Disallowed or unsupported reasoning_engine method: {class_method!r}",
             )
         return getattr(rt, class_method)
+
+    def _enforce_caller_user_id(request: Request, kwargs: dict) -> dict:
+        """Enforces that `user_id` matches the authenticated caller identity when present (mitigates M4)."""
+        sanitized = dict(kwargs)
+        verified_uid = _derive_authenticated_user_id(request)
+        if verified_uid:
+            caller_uid = str(sanitized.get("user_id") or "").strip()
+            if caller_uid and caller_uid != verified_uid:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cross-user session access denied: user_id does not match authenticated caller",
+                )
+            sanitized["user_id"] = verified_uid
+        return sanitized
 
     @app.post("/api/stream_reasoning_engine")
     async def stream_query(request: Request) -> responses.StreamingResponse:
@@ -94,7 +153,7 @@ def attach_reasoning_engine_routes(app: FastAPI) -> None:
         raw_input = body.get("input")
         if raw_input is not None and not isinstance(raw_input, dict):
             raise HTTPException(status_code=400, detail="'input' must be a JSON object")
-        kwargs = raw_input or {}
+        kwargs = _enforce_caller_user_id(request, raw_input or {})
         stream = (
             await method(**kwargs)
             if inspect.iscoroutinefunction(method)
@@ -134,7 +193,7 @@ def attach_reasoning_engine_routes(app: FastAPI) -> None:
         raw_input = body.get("input")
         if raw_input is not None and not isinstance(raw_input, dict):
             raise HTTPException(status_code=400, detail="'input' must be a JSON object")
-        kwargs = raw_input or {}
+        kwargs = _enforce_caller_user_id(request, raw_input or {})
         if inspect.iscoroutinefunction(method):
             output = await method(**kwargs)
         else:

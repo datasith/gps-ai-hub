@@ -53,16 +53,42 @@ def ensure_gcs_bucket() -> None:
         print(f"      Bucket {GCS_BUCKET} already exists.")
 
     print("      Enforcing object versioning, uniform bucket-level access, and public access prevention on bucket...")
-    subprocess.run(
-        [
-            "gcloud", "storage", "buckets", "update", GCS_BUCKET,
-            "--versioning",
-            "--uniform-bucket-level-access",
-            "--public-access-prevention",
-            f"--project={PROJECT_ID}",
-        ],
-        check=True,
-    )
+    update_cmd = [
+        "gcloud", "storage", "buckets", "update", GCS_BUCKET,
+        "--versioning",
+        "--uniform-bucket-level-access",
+        "--public-access-prevention",
+        f"--project={PROJECT_ID}",
+    ]
+    cmek_key = os.environ.get("GCS_CMEK_KEY_NAME", "").strip()
+    if cmek_key:
+        update_cmd.append(f"--default-encryption-key={cmek_key}")
+    subprocess.run(update_cmd, check=True)
+
+    # Mitigates M2: Support WORM retention policy (`GCS_RETENTION_PERIOD`, e.g. `365d` or `7y`)
+    # and optional retention policy lock (`LOCK_GCS_RETENTION_POLICY=true`).
+    retention_period = os.environ.get("GCS_RETENTION_PERIOD", "").strip()
+    if retention_period:
+        print(f"      Applying WORM retention policy ({retention_period}) on {GCS_BUCKET}...")
+        subprocess.run(
+            [
+                "gcloud", "storage", "buckets", "update", GCS_BUCKET,
+                "--clear-Versioning",
+                f"--retention-period={retention_period}",
+                f"--project={PROJECT_ID}",
+            ],
+            check=True,
+        )
+        if os.environ.get("LOCK_GCS_RETENTION_POLICY", "false").lower() == "true":
+            subprocess.run(
+                [
+                    "gcloud", "storage", "buckets", "update", GCS_BUCKET,
+                    "--lock-retention-policy",
+                    "--quiet",
+                    f"--project={PROJECT_ID}",
+                ],
+                check=True,
+            )
 
 
 def ensure_bq_dataset_and_table() -> None:

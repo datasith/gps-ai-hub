@@ -122,6 +122,7 @@ def main() -> None:
     print(f"\n=== [3/6] Deploying Cloud Run Service '{SERVICE_NAME}' ({REGION}) ===")
     env_vars = (
         f"GCP_PROJECT_ID={PROJECT_ID},"
+        f"GCP_PROJECT_NUMBER={proj_num},"
         f"WORKFORCE_POOL_ID={WORKFORCE_POOL_ID},"
         f"ARCHIVER_PROVIDER_ID={PROVIDER_ID},"
         f"KMS_LOCATION={KMS_LOCATION},"

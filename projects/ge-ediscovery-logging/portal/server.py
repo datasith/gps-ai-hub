@@ -14,12 +14,14 @@ Serves:
                              support for HTML5 audio/video, PDF.js canvas, images, and slides
 """
 
+import base64
 import json
 import mimetypes
 import os
 import re
 import ssl
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 BQ_DATASET = os.environ.get("BQ_DATASET", "ge_ediscovery")
 BQ_TABLE = os.environ.get("BQ_TABLE", "conversation_turns")
+IAP_EXPECTED_AUDIENCE = os.environ.get("IAP_AUDIENCE", "").strip()
 REVIEWER_EMAIL = os.environ.get("PORTAL_REVIEWER_EMAIL", "compliance-reviewer@enterprise.internal")
 REVIEWER_NAME = os.environ.get("PORTAL_REVIEWER_NAME", "Compliance & Legal Reviewer")
 
@@ -42,9 +45,206 @@ SSL_CTX = (
 )
 
 _GCP_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+_IAP_PUBKEYS_CACHE: dict[str, object] = {"keys": {}, "expires_at": 0.0}
+_GOOGLE_OIDC_CERTS_CACHE: dict[str, object] = {"certs": {}, "expires_at": 0.0}
 _LOGS_CACHE: dict[str, object] = {"data": None, "timestamp": 0.0}
 _NB_ARCHIVE_CACHE: dict[str, dict] = {}
 CACHE_TTL_SECONDS = 30.0
+
+
+def _encode_der_int(val_bytes: bytes) -> bytes:
+    """Encodes a positive big-endian integer into ASN.1 DER INTEGER format."""
+    stripped = val_bytes.lstrip(b"\x00") or b"\x00"
+    if stripped[0] & 0x80:
+        stripped = b"\x00" + stripped
+    return b"\x02" + bytes([len(stripped)]) + stripped
+
+
+def _ecdsa_raw_to_der(raw_sig: bytes) -> bytes:
+    """Converts a 64-byte raw ES256 (r || s) JWT signature into ASN.1 DER sequence."""
+    if len(raw_sig) != 64:
+        raise ValueError("Invalid ES256 signature length")
+    r_der = _encode_der_int(raw_sig[:32])
+    s_der = _encode_der_int(raw_sig[32:])
+    seq_body = r_der + s_der
+    return b"\x30" + bytes([len(seq_body)]) + seq_body
+
+
+def _fetch_iap_public_keys() -> dict[str, str]:
+    now = time.time()
+    cached = _IAP_PUBKEYS_CACHE.get("keys")
+    if isinstance(cached, dict) and cached and float(_IAP_PUBKEYS_CACHE.get("expires_at", 0.0)) > now:
+        return cached
+    req = urllib.request.Request("https://www.gstatic.com/iap/verify/public_key")
+    with urllib.request.urlopen(req, context=SSL_CTX, timeout=5) as resp:
+        keys = json.loads(resp.read().decode("utf-8"))
+        if isinstance(keys, dict):
+            _IAP_PUBKEYS_CACHE["keys"] = keys
+            _IAP_PUBKEYS_CACHE["expires_at"] = now + 3600.0
+            return keys
+    return {}
+
+
+def _fetch_google_oidc_certs() -> dict[str, str]:
+    now = time.time()
+    cached = _GOOGLE_OIDC_CERTS_CACHE.get("certs")
+    if isinstance(cached, dict) and cached and float(_GOOGLE_OIDC_CERTS_CACHE.get("expires_at", 0.0)) > now:
+        return cached
+    req = urllib.request.Request("https://www.googleapis.com/oauth2/v1/certs")
+    with urllib.request.urlopen(req, context=SSL_CTX, timeout=5) as resp:
+        certs = json.loads(resp.read().decode("utf-8"))
+        if isinstance(certs, dict):
+            _GOOGLE_OIDC_CERTS_CACHE["certs"] = certs
+            _GOOGLE_OIDC_CERTS_CACHE["expires_at"] = now + 3600.0
+            return certs
+    return {}
+
+
+def _verify_es256_iap_jwt(jwt_token: str) -> tuple[str, str] | None:
+    """
+    Cryptographically verifies a `X-Goog-IAP-JWT-Assertion` ES256 JWT against
+    Google IAP's public EC keys (`https://www.gstatic.com/iap/verify/public_key`).
+    Mitigates N2.
+    """
+    parts = jwt_token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        hdr = json.loads(base64.urlsafe_b64decode(parts[0] + "=" * (-len(parts[0]) % 4)).decode("utf-8"))
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)).decode("utf-8"))
+        raw_sig = base64.urlsafe_b64decode(parts[2] + "=" * (-len(parts[2]) % 4))
+    except Exception:
+        return None
+
+    if hdr.get("alg") != "ES256":
+        return None
+    kid = str(hdr.get("kid") or "").strip()
+    if not kid:
+        return None
+
+    now = time.time()
+    if float(claims.get("exp") or 0) <= now - 30 or float(claims.get("iat") or 0) > now + 120:
+        return None
+    if claims.get("iss") != "https://cloud.google.com/iap":
+        return None
+    if IAP_EXPECTED_AUDIENCE and str(claims.get("aud") or "") != IAP_EXPECTED_AUDIENCE:
+        return None
+
+    email = str(claims.get("email") or "").strip()
+    if not email:
+        return None
+    if ":" in email:
+        email = email.split(":", 1)[1].strip()
+
+    try:
+        keys = _fetch_iap_public_keys()
+        pub_pem = keys.get(kid, "")
+        if not pub_pem:
+            _IAP_PUBKEYS_CACHE["expires_at"] = 0.0
+            pub_pem = _fetch_iap_public_keys().get(kid, "")
+        if not pub_pem:
+            return None
+        der_sig = _ecdsa_raw_to_der(raw_sig)
+        with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as pf, tempfile.NamedTemporaryFile(
+            "wb", suffix=".sig", delete=False
+        ) as sf:
+            pub_path, sig_path = pf.name, sf.name
+            pf.write(pub_pem)
+            sf.write(der_sig)
+        try:
+            res = subprocess.run(
+                ["openssl", "dgst", "-sha256", "-verify", pub_path, "-signature", sig_path],
+                input=f"{parts[0]}.{parts[1]}".encode("ascii"),
+                capture_output=True,
+                timeout=5,
+            )
+            if res.returncode != 0:
+                return None
+        finally:
+            for p in (pub_path, sig_path):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+    except Exception:
+        return None
+
+    return email, email.split("@")[0]
+
+
+def _verify_rs256_google_oidc_jwt(jwt_token: str) -> tuple[str, str] | None:
+    """
+    Cryptographically verifies a Google-signed RS256 OIDC ID token (for Cloud Run IAM
+    invokers when testing or calling via `Authorization: Bearer <id_token>`).
+    """
+    parts = jwt_token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        hdr = json.loads(base64.urlsafe_b64decode(parts[0] + "=" * (-len(parts[0]) % 4)).decode("utf-8"))
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)).decode("utf-8"))
+        sig = base64.urlsafe_b64decode(parts[2] + "=" * (-len(parts[2]) % 4))
+    except Exception:
+        return None
+
+    if hdr.get("alg") != "RS256":
+        return None
+    kid = str(hdr.get("kid") or "").strip()
+    if not kid:
+        return None
+
+    now = time.time()
+    if float(claims.get("exp") or 0) <= now - 30 or float(claims.get("iat") or 0) > now + 120:
+        return None
+    if str(claims.get("iss") or "") not in ("https://accounts.google.com", "accounts.google.com"):
+        return None
+
+    email = str(claims.get("email") or "").strip()
+    if not email or claims.get("email_verified") is not True:
+        return None
+
+    try:
+        certs = _fetch_google_oidc_certs()
+        cert_pem = certs.get(kid, "")
+        if not cert_pem:
+            _GOOGLE_OIDC_CERTS_CACHE["expires_at"] = 0.0
+            cert_pem = _fetch_google_oidc_certs().get(kid, "")
+        if not cert_pem:
+            return None
+        with tempfile.NamedTemporaryFile("w", suffix=".crt", delete=False) as cf, tempfile.NamedTemporaryFile(
+            "wb", suffix=".pub", delete=False
+        ) as pf, tempfile.NamedTemporaryFile("wb", suffix=".sig", delete=False) as sf:
+            cert_path, pub_path, sig_path = cf.name, pf.name, sf.name
+            cf.write(cert_pem)
+            sf.write(sig)
+        try:
+            pub_pem = subprocess.check_output(
+                ["openssl", "x509", "-pubkey", "-noout", "-in", cert_path],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            with open(pub_path, "wb") as pf_out:
+                pf_out.write(pub_pem)
+            res = subprocess.run(
+                ["openssl", "dgst", "-sha256", "-verify", pub_path, "-signature", sig_path],
+                input=f"{parts[0]}.{parts[1]}".encode("ascii"),
+                capture_output=True,
+                timeout=5,
+            )
+            if res.returncode != 0:
+                return None
+        finally:
+            for p in (cert_path, pub_path, sig_path):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+    except Exception:
+        return None
+
+    return email, email.split("@")[0]
 
 
 def get_bucket_name(project_id: str) -> str:
@@ -528,30 +728,38 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
                 "frame-ancestors 'none'",
             )
 
-    def get_authenticated_reviewer(self) -> tuple[str, str]:
-        """Extracts the verified reviewer identity from Cloud Run IAP headers when present."""
-        iap_email = self.headers.get("X-Goog-Authenticated-User-Email", "").strip()
-        if iap_email:
-            if ":" in iap_email:
-                iap_email = iap_email.split(":", 1)[1].strip()
-            return iap_email, iap_email.split("@")[0]
+    def get_authenticated_reviewer(self) -> tuple[str, str] | None:
+        """
+        Cryptographically verifies the reviewer identity (mitigates N2):
+          1. Verifies `X-Goog-IAP-JWT-Assertion` (ES256) against Google IAP's public EC keys.
+          2. Or verifies `Authorization: Bearer <id_token>` (RS256) against Google OIDC certs
+             (for Cloud Run IAM authenticated callers).
+          3. Never trusts raw `X-Goog-Authenticated-User-Email` headers or falls back to a static
+             identity when running in Cloud Run (`K_SERVICE` is set).
+          4. Only allows local-dev identity when running outside Cloud Run (`K_SERVICE` unset).
+        """
         iap_jwt = self.headers.get("X-Goog-IAP-JWT-Assertion", "").strip()
-        if iap_jwt and iap_jwt.count(".") == 2:
-            try:
-                import base64
-                payload_b64 = iap_jwt.split(".")[1]
-                payload_b64 += "=" * (-len(payload_b64) % 4)
-                claims = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
-                email = str(claims.get("email") or "").strip()
-                if email:
-                    return email, email.split("@")[0]
-            except Exception:
-                pass
+        if iap_jwt:
+            verified_iap = _verify_es256_iap_jwt(iap_jwt)
+            if verified_iap:
+                return verified_iap
+            return None
+
+        auth_header = self.headers.get("Authorization", "").strip()
+        if auth_header.startswith("Bearer "):
+            bearer_tok = auth_header.split(" ", 1)[1].strip()
+            verified_oidc = _verify_rs256_google_oidc_jwt(bearer_tok)
+            if verified_oidc:
+                return verified_oidc
+            return None
+
+        if os.environ.get("K_SERVICE"):
+            return None
+
         return REVIEWER_EMAIL, REVIEWER_NAME
 
-    def emit_access_audit_log(self, action: str, target: str, extra: dict | None = None) -> None:
+    def emit_access_audit_log(self, reviewer_email: str, action: str, target: str, extra: dict | None = None) -> None:
         """Emits a structured Cloud Logging audit entry for every eDiscovery compliance access."""
-        reviewer_email, _ = self.get_authenticated_reviewer()
         forwarded_for = self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         entry = {
             "severity": "INFO",
@@ -585,8 +793,21 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"status": "ok", "service": "ge-ediscovery-portal"})
             return
 
+        if path.startswith("/api/"):
+            reviewer = self.get_authenticated_reviewer()
+            if reviewer is None:
+                self.send_json(
+                    401,
+                    {
+                        "error": "Unauthorized: Missing or invalid cryptographic IAP / OIDC identity token",
+                    },
+                )
+                return
+            rev_email, rev_name = reviewer
+        else:
+            rev_email, rev_name = "", ""
+
         if path == "/api/config":
-            rev_email, rev_name = self.get_authenticated_reviewer()
             self.send_json(200, {
                 "project_id": PROJECT_ID,
                 "bq_dataset": BQ_DATASET,
@@ -598,7 +819,7 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/logs":
             force_refresh = qs.get("force_refresh", ["false"])[0].lower() == "true"
-            self.emit_access_audit_log("LIST_COMPLIANCE_LOGS", f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}", {"force_refresh": force_refresh})
+            self.emit_access_audit_log(rev_email, "LIST_COMPLIANCE_LOGS", f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}", {"force_refresh": force_refresh})
             try:
                 data = build_compliance_dataset(PROJECT_ID, force_refresh=force_refresh)
                 self.send_json(200, data)
@@ -613,7 +834,7 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
             if len(q) < 2:
                 self.send_json(200, {"matched_sessions": [], "matched_notebooks": [], "total_matches": 0})
                 return
-            self.emit_access_audit_log("SEARCH_COMPLIANCE_LOGS", f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}", {"query_length": len(q), "filtered_user": user_email})
+            self.emit_access_audit_log(rev_email, "SEARCH_COMPLIANCE_LOGS", f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}", {"query_length": len(q), "filtered_user": user_email})
             try:
                 sql = f"""
                     SELECT DISTINCT
@@ -687,7 +908,7 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": str(e)})
                 return
 
-            self.emit_access_audit_log("STREAM_ARCHIVE_MEDIA", gcs_uri, {"download": is_download})
+            self.emit_access_audit_log(rev_email, "STREAM_ARCHIVE_MEDIA", gcs_uri, {"download": is_download})
             try:
                 gcp_token = get_gcp_access_token()
                 encoded_obj = urllib.parse.quote(obj_path, safe="")
