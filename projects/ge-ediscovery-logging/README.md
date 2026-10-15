@@ -36,6 +36,8 @@ When a user authenticates to Gemini Enterprise or NotebookLM Enterprise via **Wo
 
 ### How This Solution Solves These Challenges
 
+![Gemini Enterprise to Microsoft Purview eDiscovery End-to-End Flow Infographic](./ediscovery_pdf_flow_infographic.svg)
+
 ```mermaid
 flowchart LR
     subgraph IAM["Spoliation Prevention & Drift-Safe IAM"]
