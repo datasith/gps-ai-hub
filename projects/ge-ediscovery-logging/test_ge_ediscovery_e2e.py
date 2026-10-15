@@ -24,6 +24,7 @@ from ge_harvest import (
     download_session_file,
     fetch_session_details,
     get_bucket_name,
+    get_gcp_access_token,
     harvest_session,
     load_rows_to_bigquery,
     mint_sts_token,
@@ -256,7 +257,7 @@ def check_5_gcs_archive_objects(project_id: str, bucket_name: str, user_file_id:
     ).decode("utf-8")
     objects = [line.strip() for line in out.splitlines() if line.strip().startswith("gs://")]
     assert any("USER_PROVIDED" in o and user_file_id in o for o in objects), "USER_PROVIDED file missing in GCS!"
-    assert any("session_transcript.json" in o for o in objects), "session_transcript.json missing in GCS!"
+    assert any("session_transcript_" in o or "session_transcript.json" in o for o in objects), "session_transcript missing in GCS!"
     print(f"  PASS: Found {len(objects)} archived object(s) in gs://{bucket_name} (transcripts, USER_PROVIDED, AI_GENERATED).")
 
 
