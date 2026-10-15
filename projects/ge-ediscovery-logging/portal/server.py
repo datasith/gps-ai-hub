@@ -505,9 +505,71 @@ def build_compliance_dataset(project_id: str, force_refresh: bool = False) -> di
 
 
 class PortalRequestHandler(BaseHTTPRequestHandler):
+    def send_security_headers(self, is_media: bool = False) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if is_media:
+            self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
+        else:
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self' https://cdnjs.cloudflare.com; "
+                "worker-src 'self' blob: https://cdnjs.cloudflare.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "img-src 'self' data: blob: https:; "
+                "media-src 'self' blob:; "
+                "frame-src https://www.youtube.com; "
+                "connect-src 'self' https://cdnjs.cloudflare.com; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none'",
+            )
+
+    def get_authenticated_reviewer(self) -> tuple[str, str]:
+        """Extracts the verified reviewer identity from Cloud Run IAP headers when present."""
+        iap_email = self.headers.get("X-Goog-Authenticated-User-Email", "").strip()
+        if iap_email:
+            if ":" in iap_email:
+                iap_email = iap_email.split(":", 1)[1].strip()
+            return iap_email, iap_email.split("@")[0]
+        iap_jwt = self.headers.get("X-Goog-IAP-JWT-Assertion", "").strip()
+        if iap_jwt and iap_jwt.count(".") == 2:
+            try:
+                import base64
+                payload_b64 = iap_jwt.split(".")[1]
+                payload_b64 += "=" * (-len(payload_b64) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+                email = str(claims.get("email") or "").strip()
+                if email:
+                    return email, email.split("@")[0]
+            except Exception:
+                pass
+        return REVIEWER_EMAIL, REVIEWER_NAME
+
+    def emit_access_audit_log(self, action: str, target: str, extra: dict | None = None) -> None:
+        """Emits a structured Cloud Logging audit entry for every eDiscovery compliance access."""
+        reviewer_email, _ = self.get_authenticated_reviewer()
+        forwarded_for = self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        entry = {
+            "severity": "INFO",
+            "event_type": "ediscovery_portal_access_audit",
+            "reviewer_email": reviewer_email,
+            "action": action,
+            "target": target,
+            "remote_ip": forwarded_for or self.client_address[0],
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        if extra:
+            entry.update(extra)
+        print(json.dumps(entry), flush=True)
+
     def send_json(self, status_code: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status_code)
+        self.send_security_headers(is_media=False)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -524,23 +586,25 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/config":
+            rev_email, rev_name = self.get_authenticated_reviewer()
             self.send_json(200, {
                 "project_id": PROJECT_ID,
                 "bq_dataset": BQ_DATASET,
                 "gcs_bucket": get_bucket_name(PROJECT_ID),
-                "reviewer_email": REVIEWER_EMAIL,
-                "reviewer_name": REVIEWER_NAME,
+                "reviewer_email": rev_email,
+                "reviewer_name": rev_name,
             })
             return
 
         if path == "/api/logs":
             force_refresh = qs.get("force_refresh", ["false"])[0].lower() == "true"
+            self.emit_access_audit_log("LIST_COMPLIANCE_LOGS", f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}", {"force_refresh": force_refresh})
             try:
                 data = build_compliance_dataset(PROJECT_ID, force_refresh=force_refresh)
                 self.send_json(200, data)
             except Exception as e:
                 print(f"[!] Error in /api/logs: {e}")
-                self.send_json(500, {"error": "Failed to query compliance dataset", "details": str(e)})
+                self.send_json(500, {"error": "Failed to query compliance dataset"})
             return
 
         if path == "/api/search":
@@ -549,6 +613,7 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
             if len(q) < 2:
                 self.send_json(200, {"matched_sessions": [], "matched_notebooks": [], "total_matches": 0})
                 return
+            self.emit_access_audit_log("SEARCH_COMPLIANCE_LOGS", f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}", {"query_length": len(q), "filtered_user": user_email})
             try:
                 sql = f"""
                     SELECT DISTINCT
@@ -622,6 +687,7 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": str(e)})
                 return
 
+            self.emit_access_audit_log("STREAM_ARCHIVE_MEDIA", gcs_uri, {"download": is_download})
             try:
                 gcp_token = get_gcp_access_token()
                 encoded_obj = urllib.parse.quote(obj_path, safe="")
@@ -644,8 +710,23 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
                         if guessed_type:
                             content_type = guessed_type
 
+                    # Prevent Stored XSS via active web content types (.html, .svg, .xml):
+                    # never render HTML/SVG/XML inline as executable documents under the portal origin.
+                    lower_fname = fname.lower()
+                    lower_ct = content_type.lower()
+                    is_active_web_doc = (
+                        lower_fname.endswith((".html", ".htm", ".svg", ".xml", ".xhtml"))
+                        or "html" in lower_ct
+                        or "svg" in lower_ct
+                        or "xml" in lower_ct
+                    )
+                    if is_active_web_doc:
+                        content_type = "text/plain; charset=utf-8"
+                        is_download = True
+
                     data = gcs_resp.read()
                     self.send_response(status_code)
+                    self.send_security_headers(is_media=True)
                     self.send_header("Content-Type", content_type)
                     self.send_header("Content-Length", str(len(data)))
                     self.send_header("Accept-Ranges", "bytes")
@@ -679,6 +760,7 @@ class PortalRequestHandler(BaseHTTPRequestHandler):
         with open(candidate, "rb") as f:
             content = f.read()
         self.send_response(200)
+        self.send_security_headers(is_media=False)
         self.send_header("Content-Type", ctype or "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()

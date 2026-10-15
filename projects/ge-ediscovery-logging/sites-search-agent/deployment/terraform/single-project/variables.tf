@@ -36,14 +36,12 @@ variable "telemetry_logs_filter" {
 }
 
 variable "app_sa_roles" {
-  description = "List of roles to assign to the application service account"
+  description = "List of least-privilege roles to assign to the application service account"
   type        = list(string)
   default = [
-
     "roles/aiplatform.user",
-    "roles/logging.logWriter",
+    "roles/discoveryengine.viewer",
     "roles/cloudtrace.agent",
-    "roles/storage.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
 }

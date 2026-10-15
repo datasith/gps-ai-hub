@@ -174,8 +174,16 @@ class _SummaryPDF(FPDF):
         self.cell(0, 5, f"Page {self.page_no()} of {{nb}}", align="R")
 
 
+_ALLOWED_OAUTH_STATE_KEYS = (
+    "temp:oauth_token",
+    "temp:access_token",
+    "temp:user_access_token",
+    "temp:google_access_token",
+)
+
+
 def _extract_bearer_token(tool_context: ToolContext | None) -> str:
-    """Extract user OAuth token from ToolContext state if available, else ADC token."""
+    """Extract end-user OAuth token from explicit ToolContext state keys, with optional ADC fallback."""
     if tool_context is not None and hasattr(tool_context, "state"):
         try:
             state_dict = (
@@ -183,14 +191,20 @@ def _extract_bearer_token(tool_context: ToolContext | None) -> str:
                 if hasattr(tool_context.state, "to_dict")
                 else dict(tool_context.state)
             )
-            for k, v in state_dict.items():
-                if k.startswith("temp:") and isinstance(v, str) and len(v) > 20:
-                    return v
+            for key in _ALLOWED_OAUTH_STATE_KEYS:
+                val = state_dict.get(key)
+                if isinstance(val, str) and len(val) > 20:
+                    return val.strip()
         except Exception:
             pass
 
+    if os.environ.get("REQUIRE_USER_OAUTH_TOKEN", "false").lower() in ("true", "1"):
+        raise PermissionError(
+            "User OAuth access token is required in ToolContext state when REQUIRE_USER_OAUTH_TOKEN=true."
+        )
+
     creds, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        scopes=["https://www.googleapis.com/auth/discoveryengine.readwrite"]
     )
     if not creds.valid:
         creds.refresh(Request())

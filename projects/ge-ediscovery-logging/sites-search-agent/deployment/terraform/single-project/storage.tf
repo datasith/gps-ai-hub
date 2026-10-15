@@ -23,6 +23,7 @@ resource "google_storage_bucket" "logs_data_bucket" {
   location                    = var.region
   project                     = var.project_id
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
 
   depends_on = [resource.google_project_service.services]
 }

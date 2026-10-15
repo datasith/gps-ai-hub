@@ -81,9 +81,20 @@ def attach_reasoning_engine_routes(app: FastAPI) -> None:
 
     @app.post("/api/stream_reasoning_engine")
     async def stream_query(request: Request) -> responses.StreamingResponse:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid JSON request body") from exc
+        if not isinstance(body, dict) or not isinstance(body.get("class_method"), str):
+            raise HTTPException(
+                status_code=400,
+                detail="Request body must be a JSON object with a string 'class_method'",
+            )
         method = resolve_method(body["class_method"], streaming=True)
-        kwargs = body.get("input") or {}
+        raw_input = body.get("input")
+        if raw_input is not None and not isinstance(raw_input, dict):
+            raise HTTPException(status_code=400, detail="'input' must be a JSON object")
+        kwargs = raw_input or {}
         stream = (
             await method(**kwargs)
             if inspect.iscoroutinefunction(method)
@@ -110,9 +121,20 @@ def attach_reasoning_engine_routes(app: FastAPI) -> None:
 
     @app.post("/api/reasoning_engine")
     async def query(request: Request) -> responses.JSONResponse:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid JSON request body") from exc
+        if not isinstance(body, dict) or not isinstance(body.get("class_method"), str):
+            raise HTTPException(
+                status_code=400,
+                detail="Request body must be a JSON object with a string 'class_method'",
+            )
         method = resolve_method(body["class_method"], streaming=False)
-        kwargs = body.get("input") or {}
+        raw_input = body.get("input")
+        if raw_input is not None and not isinstance(raw_input, dict):
+            raise HTTPException(status_code=400, detail="'input' must be a JSON object")
+        kwargs = raw_input or {}
         if inspect.iscoroutinefunction(method):
             output = await method(**kwargs)
         else:

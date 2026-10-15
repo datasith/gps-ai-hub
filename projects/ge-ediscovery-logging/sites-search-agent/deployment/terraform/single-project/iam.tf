@@ -57,16 +57,11 @@ resource "google_project_iam_member" "app_sa_roles" {
 }
 
 
-# Grant required permissions to Vertex AI service account for Agent Runtime
-resource "google_project_iam_member" "vertex_ai_sa_permissions" {
-  for_each = {
-    for pair in setproduct(keys(local.project_ids), var.app_sa_roles) :
-    join(",", pair) => pair[1]
-  }
-
-  project = var.project_id
-  role    = each.value
-  member  = google_project_service_identity.vertex_sa.member
-  depends_on = [resource.google_project_service.services]
+# Grant bucket-scoped object access on the logs/artifacts bucket (instead of project-wide storage.admin)
+resource "google_storage_bucket_iam_member" "app_sa_logs_bucket_object_user" {
+  bucket     = google_storage_bucket.logs_data_bucket.name
+  role       = "roles/storage.objectUser"
+  member     = "serviceAccount:${google_service_account.app_sa.email}"
+  depends_on = [google_storage_bucket.logs_data_bucket]
 }
 

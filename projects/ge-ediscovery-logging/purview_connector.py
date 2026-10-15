@@ -62,6 +62,13 @@ TOKEN_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pu
 FIRST_PARTY_OFFICE_CLIENT_ID = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
 
 
+def _write_token_cache_secure(data: dict[str, str]) -> None:
+    """Atomically writes the local developer token cache with mode 0600 from creation."""
+    fd = os.open(TOKEN_CACHE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
 def load_cached_credentials() -> dict[str, str]:
     if os.path.exists(TOKEN_CACHE_FILE):
         try:
@@ -120,16 +127,13 @@ def run_device_code_login(tenant_id: str, client_id: str = FIRST_PARTY_OFFICE_CL
                 access_token = tok_payload["access_token"]
                 refresh_token = tok_payload.get("refresh_token", "")
                 if refresh_token:
-                    with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(
-                            {
-                                "tenant_id": tenant_id,
-                                "client_id": client_id,
-                                "refresh_token": refresh_token,
-                            },
-                            f,
-                        )
-                    os.chmod(TOKEN_CACHE_FILE, 0o600)
+                    _write_token_cache_secure(
+                        {
+                            "tenant_id": tenant_id,
+                            "client_id": client_id,
+                            "refresh_token": refresh_token,
+                        }
+                    )
                 print("[+] Microsoft Entra ID / Purview authentication succeeded!", flush=True)
                 return access_token
         except urllib.error.HTTPError as e:
@@ -190,11 +194,9 @@ def get_graph_access_token(
         expires_in = float(payload.get("expires_in", 3599))
         if payload.get("refresh_token") and os.path.exists(TOKEN_CACHE_FILE):
             try:
-                with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(
-                        {"tenant_id": t_id, "client_id": c_id, "refresh_token": payload["refresh_token"]},
-                        f,
-                    )
+                _write_token_cache_secure(
+                    {"tenant_id": t_id, "client_id": c_id, "refresh_token": payload["refresh_token"]}
+                )
             except Exception:
                 pass
         _GRAPH_TOKEN_CACHE[cache_key] = (access_token, now + expires_in)

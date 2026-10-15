@@ -62,9 +62,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+enable_web_ui = os.environ.get("ENABLE_ADK_WEB_UI", "false").lower() in (
+    "true",
+    "1",
+)
+
 app: FastAPI = get_fast_api_app(
     agents_dir=AGENT_DIR,
-    web=True,
+    web=enable_web_ui,
     artifact_service_uri=services.ARTIFACT_SERVICE_URI,
     allow_origins=allow_origins,
     session_service_uri=services.SESSION_SERVICE_URI,

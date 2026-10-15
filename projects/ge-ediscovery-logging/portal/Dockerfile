@@ -1,8 +1,8 @@
 # Stage 1: Build the React 18 + Vite + Tailwind Compliance Review SPA
 FROM node:20-slim AS frontend-builder
 WORKDIR /build
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package*.json ./
+RUN npm ci --no-audit --no-fund
 COPY tsconfig.json vite.config.ts tailwind.config.js postcss.config.js index.html ./
 COPY src ./src
 RUN npm run build

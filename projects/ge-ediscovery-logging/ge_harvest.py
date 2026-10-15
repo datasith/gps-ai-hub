@@ -21,6 +21,7 @@ import argparse
 import base64
 import datetime
 import hashlib
+import html
 import json
 import os
 import re
@@ -44,16 +45,35 @@ KMS_KEYRING = os.environ.get("KMS_KEYRING", "ge-ediscovery-kr")
 KMS_KEY = os.environ.get("KMS_KEY", "ediscovery-archiver-jwt-key")
 KMS_KEY_VERSION = os.environ.get("KMS_KEY_VERSION", "1")
 KMS_KEY_ID = os.environ.get("KMS_KEY_ID", "archiver-kms-key-1")
-LOCAL_KEY_ID = os.environ.get("ARCHIVER_KEY_ID", "archiver-key-1")
 
 BQ_DATASET = os.environ.get("BQ_DATASET", "ge_ediscovery")
 BQ_TABLE = os.environ.get("BQ_TABLE", "conversation_turns")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PRIVATE_KEY_PATH = os.environ.get(
-    "ARCHIVER_PRIVATE_KEY_PATH",
-    os.path.join(BASE_DIR, ".archiver_private_key.pem"),
+
+DISCOVERY_ENGINE_HOSTS: dict[str, str] = {
+    "global": "discoveryengine.googleapis.com",
+    "us": "us-discoveryengine.googleapis.com",
+    "eu": "eu-discoveryengine.googleapis.com",
+}
+
+SESSION_RESOURCE_RE = re.compile(
+    r"^projects/([a-z0-9-]+|\d+)/locations/(global|us|eu)/collections/[A-Za-z0-9_-]+/engines/([A-Za-z0-9_-]{1,128})/sessions/([A-Za-z0-9_-]{1,128})$"
 )
+NOTEBOOK_RESOURCE_RE = re.compile(
+    r"^projects/([a-z0-9-]+|\d+)/locations/(global|us|eu)/notebooks/([A-Za-z0-9_-]{1,128})$"
+)
+NOTEBOOK_CHILD_RESOURCE_RE = re.compile(
+    r"^projects/([a-z0-9-]+|\d+)/locations/(global|us|eu)/notebooks/([A-Za-z0-9_-]{1,128})/(sources|audioOverviews|artifacts|notes)/([A-Za-z0-9_-]{1,128})$"
+)
+
+
+def get_discovery_engine_host(loc: str) -> str:
+    """Maps a validated location ('global', 'us', 'eu') to a static Discovery Engine hostname (mitigates SSRF C1)."""
+    host = DISCOVERY_ENGINE_HOSTS.get(loc)
+    if not host:
+        raise ValueError(f"Invalid or unsupported Discovery Engine location: {loc!r}")
+    return host
 
 SSL_CTX = (
     ssl.create_default_context(cafile="/etc/ssl/cert.pem")
@@ -242,20 +262,19 @@ def sign_jwt_with_kms(signing_input: str, project_id: str) -> bytes:
 
 def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str:
     """
-    Mints an OAuth2 access token for the given WIF subject via STS token exchange.
-    Uses Google Cloud KMS asymmetricSign by default (falls back to local key only if KMS is disabled).
+    Mints an OAuth2 access token for the given WIF subject via STS token exchange
+    backed exclusively by Google Cloud KMS asymmetricSign (zero private keys on disk).
     """
     if "/subject/" in subject:
         subject = subject.split("/subject/", 1)[1].strip()
+    if not subject or len(subject) > 256:
+        raise ValueError("Invalid WIF subject for STS token exchange")
     now = int(time.time())
     cached = _STS_TOKEN_CACHE.get(subject)
     if cached and cached[1] > now + 60:
         return cached[0]
 
-    use_local = os.environ.get("USE_LOCAL_ARCHIVER_KEY", "").lower() in ("1", "true", "yes")
-    kid = LOCAL_KEY_ID if use_local else KMS_KEY_ID
-
-    header = {"alg": "RS256", "typ": "JWT", "kid": kid}
+    header = {"alg": "RS256", "typ": "JWT", "kid": KMS_KEY_ID}
     payload = {
         "iss": get_issuer_uri(project_id),
         "sub": subject,
@@ -268,20 +287,7 @@ def mint_sts_token(subject: str, project_id: str, workforce_pool_id: str) -> str
         f"{b64url_encode(json.dumps(payload).encode('utf-8'))}"
     )
 
-    if not use_local:
-        sig = sign_jwt_with_kms(signing_input, project_id)
-    else:
-        if not os.path.exists(PRIVATE_KEY_PATH):
-            raise FileNotFoundError(
-                f"Local archiver private key not found at {PRIVATE_KEY_PATH} and Cloud KMS signing disabled."
-            )
-        sig = subprocess.run(
-            ["openssl", "dgst", "-sha256", "-sign", PRIVATE_KEY_PATH],
-            input=signing_input.encode("ascii"),
-            capture_output=True,
-            check=True,
-        ).stdout
-
+    sig = sign_jwt_with_kms(signing_input, project_id)
     jwt_token = f"{signing_input}.{b64url_encode(sig)}"
 
     sts_body = urllib.parse.urlencode({
@@ -426,18 +432,33 @@ def discover_from_cloud_logging(project_id: str, hours: int = 72, extra_filter: 
 
 
 def parse_session_resource(session_name: str) -> tuple[str, str, str]:
-    """Returns (location, engine_id, session_id) from a full session resource name."""
-    parts = session_name.split("/")
-    loc = parts[parts.index("locations") + 1]
-    engine_id = parts[parts.index("engines") + 1]
-    session_id = parts[parts.index("sessions") + 1]
+    """
+    Validates a full session resource name against SESSION_RESOURCE_RE and returns
+    (location, engine_id, session_id). Prevents SSRF / path injection via forged logs (C1).
+    """
+    m = SESSION_RESOURCE_RE.fullmatch((session_name or "").strip())
+    if not m:
+        raise ValueError(f"Rejected invalid session resource name: {session_name!r}")
+    _proj, loc, engine_id, session_id = m.group(1), m.group(2), m.group(3), m.group(4)
     return loc, engine_id, session_id
+
+
+def parse_notebook_resource(nb_name: str) -> tuple[str, str]:
+    """
+    Validates a full notebook resource name against NOTEBOOK_RESOURCE_RE and returns
+    (location, notebook_id). Prevents SSRF / path injection via forged logs (C1).
+    """
+    m = NOTEBOOK_RESOURCE_RE.fullmatch((nb_name or "").strip())
+    if not m:
+        raise ValueError(f"Rejected invalid notebook resource name: {nb_name!r}")
+    _proj, loc, nb_id = m.group(1), m.group(2), m.group(3)
+    return loc, nb_id
 
 
 def fetch_session_details(session_name: str, token: str, project_id: str) -> dict:
     loc, _, _ = parse_session_resource(session_name)
-    prefix = f"{loc}-" if loc != "global" else ""
-    url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{session_name}?includeAnswerDetails=true"
+    host = get_discovery_engine_host(loc)
+    url = f"https://{host}/v1alpha/{session_name}?includeAnswerDetails=true"
     req = urllib.request.Request(
         url,
         headers={
@@ -455,8 +476,10 @@ def download_session_file(session_name: str, file_id: str, token: str, project_i
     Returns (raw_bytes, mime_type, filename).
     """
     loc, _, _ = parse_session_resource(session_name)
-    prefix = f"{loc}-" if loc != "global" else ""
-    url = f"https://{prefix}discoveryengine.googleapis.com/v1/{session_name}:downloadFile?file_id={file_id}&alt=media"
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", file_id or ""):
+        raise ValueError(f"Invalid file_id: {file_id!r}")
+    host = get_discovery_engine_host(loc)
+    url = f"https://{host}/v1/{session_name}:downloadFile?file_id={file_id}&alt=media"
     req = urllib.request.Request(
         url,
         headers={
@@ -535,7 +558,7 @@ def extract_canvas_slides(turn: dict, turn_idx: int) -> tuple[bytes, str] | None
         if not isinstance(s, dict):
             continue
         s_html = s.get("html") or s.get("content") or ""
-        s_title = s.get("title") or f"Slide {s_idx}"
+        s_title = html.escape(str(s.get("title") or f"Slide {s_idx}"), quote=True)
         if s_html:
             slide_sections.append(
                 f'<section class="canvas-slide" data-slide-index="{s_idx}" data-slide-title="{s_title}">\n'
@@ -682,7 +705,8 @@ def harvest_session(
     session_start = session_data.get("startTime", "")
 
     transcript_bytes = json.dumps(session_data, indent=2).encode("utf-8")
-    transcript_obj_path = f"sessions/{engine_id}/{session_id}/session_transcript.json"
+    transcript_sha256 = hashlib.sha256(transcript_bytes).hexdigest()[:16]
+    transcript_obj_path = f"sessions/{engine_id}/{session_id}/session_transcript_{transcript_sha256}.json"
     transcript_gcs_uri, transcript_console_url = upload_bytes_to_gcs(
         transcript_bytes, transcript_obj_path, bucket_name, project_id, "application/json"
     )
@@ -847,8 +871,11 @@ def harvest_session(
 
 def load_rows_to_bigquery(rows: list[dict], project_id: str) -> None:
     """
-    Idempotently replaces rows for the harvested session_ids in BigQuery using the
-    BigQuery REST API (parameterized DML DELETE followed by a multipart JSONL Load Job).
+    Non-destructively upserts rows for the harvested session_ids in BigQuery (mitigates M1):
+      1. Loads the batch into a staging table (`{BQ_TABLE}_staging`) with WRITE_TRUNCATE.
+      2. Executes an atomic DML MERGE into `{BQ_TABLE}` keyed on `(session_id, turn_index)`
+         (preserving any prior turns that a user might have removed, and never leaving a gap
+         if a load job fails).
     """
     if not rows:
         print("No rows to load into BigQuery.")
@@ -859,58 +886,28 @@ def load_rows_to_bigquery(rows: list[dict], project_id: str) -> None:
     if not session_ids:
         return
 
-    # 1. Parameterized DML DELETE via BigQuery REST API (jobs.query)
-    delete_url = f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries"
-    delete_payload = {
-        "query": f"DELETE FROM `{project_id}.{BQ_DATASET}.{BQ_TABLE}` WHERE session_id IN UNNEST(@session_ids)",
-        "useLegacySql": False,
-        "parameterMode": "NAMED",
-        "queryParameters": [
-            {
-                "name": "session_ids",
-                "parameterType": {"type": "ARRAY", "arrayType": {"type": "STRING"}},
-                "parameterValue": {"arrayValues": [{"value": sid} for sid in session_ids]},
-            }
-        ],
-    }
-    del_req = urllib.request.Request(
-        delete_url,
-        data=json.dumps(delete_payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {gcp_token}",
-            "Content-Type": "application/json",
-            "X-Goog-User-Project": project_id,
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(del_req, context=SSL_CTX) as resp:
-        del_resp = json.loads(resp.read().decode("utf-8"))
-        job_id = del_resp.get("jobReference", {}).get("jobId")
-        job_loc = del_resp.get("jobReference", {}).get("location", "US")
-        while not del_resp.get("jobComplete", False) and job_id:
-            time.sleep(0.5)
-            poll_req = urllib.request.Request(
-                f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries/{job_id}?location={job_loc}",
-                headers={"Authorization": f"Bearer {gcp_token}", "X-Goog-User-Project": project_id},
-            )
-            with urllib.request.urlopen(poll_req, context=SSL_CTX) as p_resp:
-                del_resp = json.loads(p_resp.read().decode("utf-8"))
+    staging_table = f"{BQ_TABLE}_staging"
+    schema_path = os.path.join(BASE_DIR, "conversation_turns_schema.json")
+    schema_fields = []
+    if os.path.exists(schema_path):
+        with open(schema_path, "r", encoding="utf-8") as sf:
+            schema_fields = json.load(sf)
 
-    # 2. Multipart Load Job via BigQuery REST API
+    # 1. Multipart Load Job into staging table via BigQuery REST API
     boundary = "===============ge_ediscovery_bq_load_boundary=="
-    job_config = {
-        "configuration": {
-            "load": {
-                "destinationTable": {
-                    "projectId": project_id,
-                    "datasetId": BQ_DATASET,
-                    "tableId": BQ_TABLE,
-                },
-                "sourceFormat": "NEWLINE_DELIMITED_JSON",
-                "writeDisposition": "WRITE_APPEND",
-            }
-        }
+    load_cfg: dict = {
+        "destinationTable": {
+            "projectId": project_id,
+            "datasetId": BQ_DATASET,
+            "tableId": staging_table,
+        },
+        "sourceFormat": "NEWLINE_DELIMITED_JSON",
+        "writeDisposition": "WRITE_TRUNCATE",
     }
+    if schema_fields:
+        load_cfg["schema"] = {"fields": schema_fields}
+
+    job_config = {"configuration": {"load": load_cfg}}
     jsonl_bytes = "".join(json.dumps(r) + "\n" for r in rows).encode("utf-8")
     multipart_body = (
         f"--{boundary}\r\n"
@@ -947,10 +944,72 @@ def load_rows_to_bigquery(rows: list[dict], project_id: str) -> None:
 
     err_result = job_data.get("status", {}).get("errorResult")
     if err_result:
-        raise RuntimeError(f"BigQuery load job failed: {err_result}")
+        raise RuntimeError(f"BigQuery staging load job failed: {err_result}")
+
+    # 2. Atomic DML MERGE from staging into destination table (never deletes un-staged rows)
+    merge_url = f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries"
+    merge_sql = f"""
+        MERGE `{project_id}.{BQ_DATASET}.{BQ_TABLE}` AS T
+        USING (
+          SELECT * EXCEPT(rn) FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY session_id, turn_index ORDER BY harvested_at DESC) AS rn
+            FROM `{project_id}.{BQ_DATASET}.{staging_table}`
+          ) WHERE rn = 1
+        ) AS S
+        ON T.session_id = S.session_id AND T.turn_index = S.turn_index
+        WHEN MATCHED THEN UPDATE SET
+          query_id = S.query_id,
+          assist_answer_id = S.assist_answer_id,
+          engine_id = S.engine_id,
+          location = S.location,
+          user_iam_principal = S.user_iam_principal,
+          session_display_name = S.session_display_name,
+          prompt_text = S.prompt_text,
+          response_text = S.response_text,
+          thought_text = S.thought_text,
+          model_name = S.model_name,
+          session_transcript_gcs_uri = S.session_transcript_gcs_uri,
+          session_transcript_console_url = S.session_transcript_console_url,
+          files = S.files,
+          event_timestamp = S.event_timestamp,
+          harvested_at = S.harvested_at
+        WHEN NOT MATCHED THEN INSERT (
+          session_id, turn_index, query_id, assist_answer_id, engine_id, location,
+          user_iam_principal, session_display_name, prompt_text, response_text,
+          thought_text, model_name, session_transcript_gcs_uri,
+          session_transcript_console_url, files, event_timestamp, harvested_at
+        ) VALUES (
+          S.session_id, S.turn_index, S.query_id, S.assist_answer_id, S.engine_id, S.location,
+          S.user_iam_principal, S.session_display_name, S.prompt_text, S.response_text,
+          S.thought_text, S.model_name, S.session_transcript_gcs_uri,
+          S.session_transcript_console_url, S.files, S.event_timestamp, S.harvested_at
+        )
+    """
+    merge_req = urllib.request.Request(
+        merge_url,
+        data=json.dumps({"query": merge_sql, "useLegacySql": False}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {gcp_token}",
+            "Content-Type": "application/json",
+            "X-Goog-User-Project": project_id,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(merge_req, context=SSL_CTX) as resp:
+        merge_resp = json.loads(resp.read().decode("utf-8"))
+        m_job_id = merge_resp.get("jobReference", {}).get("jobId")
+        m_job_loc = merge_resp.get("jobReference", {}).get("location", "US")
+        while not merge_resp.get("jobComplete", False) and m_job_id:
+            time.sleep(0.5)
+            poll_req = urllib.request.Request(
+                f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries/{m_job_id}?location={m_job_loc}",
+                headers={"Authorization": f"Bearer {gcp_token}", "X-Goog-User-Project": project_id},
+            )
+            with urllib.request.urlopen(poll_req, context=SSL_CTX) as p_resp:
+                merge_resp = json.loads(p_resp.read().decode("utf-8"))
 
     table_ref = f"{project_id}:{BQ_DATASET}.{BQ_TABLE}"
-    print(f"\n[+] Successfully loaded {len(rows)} turn row(s) across {len(session_ids)} session(s) into {table_ref}!")
+    print(f"\n[+] Successfully merged {len(rows)} turn row(s) across {len(session_ids)} session(s) into {table_ref}!")
 
     try:
         import purview_connector
@@ -992,7 +1051,7 @@ def mint_dwd_token(user_email: str, dwd_sa_email: str, project_id: str) -> str:
     jwt_claims = {
         "iss": dwd_sa_email,
         "sub": user_email,
-        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "scope": "https://www.googleapis.com/auth/discoveryengine.readwrite",
         "aud": "https://oauth2.googleapis.com/token",
         "iat": now - 60,
         "exp": now + 3600,
@@ -1063,8 +1122,10 @@ def download_notebook_scotty_media(
     Video Overview, Slide Deck PDF, Infographic PNG) via Discovery Engine's
     Scotty media download endpoint (`/download/v1alpha/{res_name}:download?alt=media`).
     """
-    prefix = f"{loc}-" if loc != "global" else ""
-    url = f"https://{prefix}discoveryengine.googleapis.com/download/v1alpha/{res_name}:download?alt=media"
+    if not NOTEBOOK_CHILD_RESOURCE_RE.fullmatch((res_name or "").strip()):
+        return None
+    host = get_discovery_engine_host(loc)
+    url = f"https://{host}/download/v1alpha/{res_name}:download?alt=media"
     req = urllib.request.Request(
         url,
         headers={
@@ -1104,7 +1165,8 @@ def harvest_notebooklm_studio_and_notes(
     Uploads each artifact to gs://{bucket_name}/notebooks/{loc}/{nb_id}/studio/
     and returns structured studio artifact records.
     """
-    prefix = f"{loc}-" if loc != "global" else ""
+    parse_notebook_resource(nb_name)
+    host = get_discovery_engine_host(loc)
     studio_records: list[dict] = []
     seen_ids: set[str] = set()
 
@@ -1139,7 +1201,7 @@ def harvest_notebooklm_studio_and_notes(
         })
 
     # 2. ListArtifacts on the notebook
-    list_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}/artifacts"
+    list_url = f"https://{host}/v1alpha/{nb_name}/artifacts"
     try:
         req = urllib.request.Request(
             list_url,
@@ -1158,10 +1220,10 @@ def harvest_notebooklm_studio_and_notes(
         seen_ids.add(art_id)
 
         art_detail = art
-        if art_name:
+        if art_name and NOTEBOOK_CHILD_RESOURCE_RE.fullmatch(art_name):
             try:
                 g_req = urllib.request.Request(
-                    f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{art_name}",
+                    f"https://{host}/v1alpha/{art_name}",
                     headers={"Authorization": f"Bearer {token}", "X-Goog-User-Project": project_id},
                 )
                 art_detail = json.loads(urllib.request.urlopen(g_req, context=SSL_CTX, timeout=15).read().decode("utf-8"))
@@ -1213,43 +1275,48 @@ def harvest_notebooklm_studio_and_notes(
 
     # 3. BatchGetNotes for any discovered note IDs
     if logged_note_ids:
-        note_names = [f"{nb_name}/notes/{nid}" for nid in sorted(logged_note_ids)]
-        q_params = "&".join(f"names={urllib.parse.quote(n, safe='/')}" for n in note_names)
-        notes_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}/notes:batchGet?{q_params}"
-        try:
-            n_req = urllib.request.Request(
-                notes_url,
-                headers={"Authorization": f"Bearer {token}", "X-Goog-User-Project": project_id},
-            )
-            n_resp = json.loads(urllib.request.urlopen(n_req, context=SSL_CTX, timeout=15).read().decode("utf-8"))
-            for note in n_resp.get("notes", []):
-                if not isinstance(note, dict):
-                    continue
-                nid = note.get("noteId") or note.get("name", "").split("/")[-1]
-                if not nid or nid in seen_ids:
-                    continue
-                seen_ids.add(nid)
-                ntitle = note.get("title") or f"Studio Note ({nid[:8]})"
-                ncontent = note.get("content") or note.get("text") or json.dumps(note, indent=2)
-                raw_bytes = ncontent.encode("utf-8")
-                gcs_path = f"notebooks/{loc}/{nb_id}/studio/note_{nid}.md"
-                gcs_uri, console_url = upload_bytes_to_gcs(raw_bytes, gcs_path, bucket_name, project_id, "text/markdown")
-                studio_records.append({
-                    "artifact_id": nid,
-                    "modality": "STUDIO_NOTE",
-                    "title": ntitle,
-                    "state": "COMPLETED",
-                    "mime_type": "text/markdown",
-                    "byte_size": len(raw_bytes),
-                    "sha256": hashlib.sha256(raw_bytes).hexdigest(),
-                    "crc32c": compute_crc32c_base64(raw_bytes),
-                    "gcs_uri": gcs_uri,
-                    "console_url": console_url,
-                    "extracted_text": ncontent[:4000],
-                    "created_at": note.get("createTime") or "",
-                })
-        except Exception:
-            pass
+        note_names = [
+            f"{nb_name}/notes/{nid}"
+            for nid in sorted(logged_note_ids)
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", nid or "")
+        ]
+        if note_names:
+            q_params = "&".join(f"names={urllib.parse.quote(n, safe='/')}" for n in note_names)
+            notes_url = f"https://{host}/v1alpha/{nb_name}/notes:batchGet?{q_params}"
+            try:
+                n_req = urllib.request.Request(
+                    notes_url,
+                    headers={"Authorization": f"Bearer {token}", "X-Goog-User-Project": project_id},
+                )
+                n_resp = json.loads(urllib.request.urlopen(n_req, context=SSL_CTX, timeout=15).read().decode("utf-8"))
+                for note in n_resp.get("notes", []):
+                    if not isinstance(note, dict):
+                        continue
+                    nid = note.get("noteId") or note.get("name", "").split("/")[-1]
+                    if not nid or nid in seen_ids:
+                        continue
+                    seen_ids.add(nid)
+                    ntitle = note.get("title") or f"Studio Note ({nid[:8]})"
+                    ncontent = note.get("content") or note.get("text") or json.dumps(note, indent=2)
+                    raw_bytes = ncontent.encode("utf-8")
+                    gcs_path = f"notebooks/{loc}/{nb_id}/studio/note_{nid}.md"
+                    gcs_uri, console_url = upload_bytes_to_gcs(raw_bytes, gcs_path, bucket_name, project_id, "text/markdown")
+                    studio_records.append({
+                        "artifact_id": nid,
+                        "modality": "STUDIO_NOTE",
+                        "title": ntitle,
+                        "state": "COMPLETED",
+                        "mime_type": "text/markdown",
+                        "byte_size": len(raw_bytes),
+                        "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+                        "crc32c": compute_crc32c_base64(raw_bytes),
+                        "gcs_uri": gcs_uri,
+                        "console_url": console_url,
+                        "extracted_text": ncontent[:4000],
+                        "created_at": note.get("createTime") or "",
+                    })
+            except Exception:
+                pass
 
     return studio_records
 
@@ -1310,9 +1377,11 @@ def harvest_notebooklm_enterprise(
             .split("/artifacts/")[0]
             .split("/notes/")[0]
         )
-        parts = nb_name.split("/")
-        loc = parts[parts.index("locations") + 1] if "locations" in parts else "global"
-        nb_id = parts[parts.index("notebooks") + 1]
+        try:
+            loc, nb_id = parse_notebook_resource(nb_name)
+        except ValueError as e:
+            print(f"  [!] Skipping invalid notebook resource in log: {e}")
+            continue
         if target_notebook_id and nb_id != target_notebook_id:
             continue
 
@@ -1375,9 +1444,9 @@ def harvest_notebooklm_enterprise(
             break
         tok = get_token_for_principal(principal, project_id, workforce_pool_id)
         for loc in ["global", "us"]:
-            prefix = f"{loc}-" if loc != "global" else ""
+            host = get_discovery_engine_host(loc)
             url = (
-                f"https://{prefix}discoveryengine.googleapis.com/v1alpha/"
+                f"https://{host}/v1alpha/"
                 f"projects/{project_id}/locations/{loc}/notebooks:listRecentlyViewed"
             )
             req = urllib.request.Request(
@@ -1388,11 +1457,16 @@ def harvest_notebooklm_enterprise(
                 resp = json.loads(urllib.request.urlopen(req, context=SSL_CTX).read().decode("utf-8"))
                 for nb in resp.get("notebooks", []):
                     nb_id = nb.get("notebookId") or nb.get("name", "").split("/")[-1]
-                    if not nb_id:
+                    if not nb_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", nb_id):
+                        continue
+                    candidate_nb_name = nb.get("name", f"projects/{project_id}/locations/{loc}/notebooks/{nb_id}")
+                    try:
+                        parse_notebook_resource(candidate_nb_name)
+                    except ValueError:
                         continue
                     nb_info = notebooks.setdefault(nb_id, {
                         "notebook_id": nb_id,
-                        "notebook_name": nb.get("name", f"projects/{project_id}/locations/{loc}/notebooks/{nb_id}"),
+                        "notebook_name": candidate_nb_name,
                         "location": loc,
                         "user_iam_principal": principal,
                         "title": nb.get("title", ""),
@@ -1412,23 +1486,22 @@ def harvest_notebooklm_enterprise(
     for nb_id, nb_info in notebooks.items():
         loc = nb_info["location"]
         nb_name = nb_info["notebook_name"]
+        try:
+            parse_notebook_resource(nb_name)
+            host = get_discovery_engine_host(loc)
+        except ValueError as e:
+            print(f"  [!] Skipping invalid notebook {nb_name}: {e}")
+            continue
         principal = nb_info["user_iam_principal"]
-        tok = get_token_for_principal(principal, project_id, workforce_pool_id)
-        prefix = f"{loc}-" if loc != "global" else ""
+        tok = get_token_for_principal(principal, project_id, workforce_pool_id) if principal else ""
 
         nb_detail = {}
-        nb_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{nb_name}"
-        cand_tokens = [tok]
-        try:
-            gcp_tok = get_gcp_access_token()
-            if gcp_tok not in cand_tokens:
-                cand_tokens.append(gcp_tok)
-        except Exception:
-            pass
+        nb_url = f"https://{host}/v1alpha/{nb_name}"
+        cand_tokens = [tok] if tok else []
         for fp in FALLBACK_PRINCIPALS:
             try:
                 fp_tok = get_token_for_principal(fp, project_id, workforce_pool_id)
-                if fp_tok not in cand_tokens:
+                if fp_tok and fp_tok not in cand_tokens:
                     cand_tokens.append(fp_tok)
             except Exception:
                 pass
@@ -1446,8 +1519,10 @@ def harvest_notebooklm_enterprise(
             except Exception as e:
                 last_nb_err = e
                 continue
-        if not nb_detail and last_nb_err:
-            print(f"  [!] Could not GET notebook {nb_id} ({loc}): {last_nb_err}")
+        if not nb_detail:
+            # Mitigates H1: Reject unverified NotebookLM log entries if notebooks.get cannot confirm ownership/existence
+            print(f"  [!] Skipping unverified notebook {nb_id} ({loc}): could not confirm via notebooks.get ({last_nb_err})")
+            continue
 
         title = nb_detail.get("title") or nb_info.get("title") or f"Untitled Notebook ({nb_id[:8]})"
         create_time = nb_detail.get("metadata", {}).get("createTime") or nb_info.get("latest_timestamp") or now_iso
@@ -1460,9 +1535,9 @@ def harvest_notebooklm_enterprise(
             sid = src.get("sourceId", {}).get("id") or sname.split("/")[-1]
             seen_source_ids.add(sid)
             s_detail = src
-            if sname:
+            if sname and NOTEBOOK_CHILD_RESOURCE_RE.fullmatch(sname):
                 try:
-                    s_url = f"https://{prefix}discoveryengine.googleapis.com/v1alpha/{sname}"
+                    s_url = f"https://{host}/v1alpha/{sname}"
                     s_req = urllib.request.Request(
                         s_url,
                         headers={"Authorization": f"Bearer {tok}", "X-Goog-User-Project": project_id},
@@ -1507,7 +1582,7 @@ def harvest_notebooklm_enterprise(
         archive_bytes = json.dumps(archive_payload, indent=2).encode("utf-8")
         archive_sha256 = hashlib.sha256(archive_bytes).hexdigest()
         archive_crc32c = compute_crc32c_base64(archive_bytes)
-        gcs_path = f"notebooks/{loc}/{nb_id}/notebook_archive.json"
+        gcs_path = f"notebooks/{loc}/{nb_id}/notebook_archive_{archive_sha256[:16]}.json"
         archive_gcs_uri, archive_console_url = upload_bytes_to_gcs(
             archive_bytes, gcs_path, bucket_name, project_id, "application/json"
         )
@@ -1699,10 +1774,7 @@ def harvest_single_event(log_entry: dict) -> dict:
             .split("/artifacts/")[0]
             .split("/notes/")[0]
         )
-        parts = nb_name.split("/")
-        nb_id = parts[parts.index("notebooks") + 1]
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", nb_id):
-            raise ValueError("Invalid notebook_id format")
+        _, nb_id = parse_notebook_resource(nb_name)
 
         rows = harvest_notebooklm_enterprise(
             project_id=project_id,

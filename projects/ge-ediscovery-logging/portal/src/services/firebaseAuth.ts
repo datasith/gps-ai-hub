@@ -1,3 +1,11 @@
+/**
+ * Identity & Session Adapter for the Cloud Run Compliance Review Portal.
+ *
+ * Authentication and authorization are enforced at the Google Cloud Run
+ * infrastructure boundary via native Identity-Aware Proxy (IAP) and Cloud Run IAM
+ * (`roles/iap.httpsResourceAccessor` / `roles/run.invoker`). This module fetches
+ * the verified IAP reviewer identity exposed by `/api/config` (`X-Goog-IAP-JWT-Assertion`).
+ */
 import { APP_CONFIG } from '../config/appConfig';
 
 export interface User {
@@ -14,7 +22,7 @@ const SIGN_OUT_STORAGE_KEY = 'ge_portal_signed_out';
 const listeners = new Set<AuthListener>();
 
 let currentUser: User | null = null;
-let cachedAuthToken = 'cloud-run-session-token';
+const cachedAuthToken = 'iap-managed-session';
 let configLoaded = false;
 
 function buildDefaultUser(email?: string, displayName?: string): User {

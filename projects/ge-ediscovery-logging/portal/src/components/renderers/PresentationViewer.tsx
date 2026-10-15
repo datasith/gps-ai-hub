@@ -314,20 +314,38 @@ function sanitizeHtml(html: string): string {
   if (!root) return '';
 
   root.querySelectorAll('*').forEach((el) => {
-    if (BLOCKED_TAGS.has(el.tagName.toUpperCase())) {
+    const tag = el.tagName.toUpperCase();
+    if (BLOCKED_TAGS.has(tag)) {
       el.remove();
       return;
     }
     Array.from(el.attributes).forEach(({ name, value }) => {
       const attr = name.toLowerCase();
-      const isUrlAttr = attr === 'href' || attr === 'src' || attr === 'xlink:href' || attr === 'formaction';
-      if (
-        attr.startsWith('on') ||
-        attr === 'srcdoc' ||
+      const isUrlAttr =
+        attr === 'href' ||
+        attr === 'src' ||
+        attr === 'xlink:href' ||
+        attr === 'action' ||
         attr === 'formaction' ||
-        (isUrlAttr && /^\s*(javascript|vbscript|data\s*:\s*text\/html):?/i.test(value))
-      ) {
+        attr === 'data' ||
+        attr === 'poster';
+      if (attr.startsWith('on') || attr === 'srcdoc' || attr === 'formaction' || attr === 'style') {
         el.removeAttribute(name);
+        return;
+      }
+      if (isUrlAttr) {
+        // Strip all ASCII control characters and whitespace before scheme validation
+        const normalized = value.replace(/[\u0000-\u0020]+/g, '');
+        const isSafeHttp = /^https?:\/\//i.test(normalized);
+        const isSafeMailto = attr === 'href' && /^mailto:/i.test(normalized);
+        const isSafeRelative = normalized.startsWith('/api/media?') || normalized.startsWith('#');
+        const isSafeDataImg =
+          tag === 'IMG' &&
+          attr === 'src' &&
+          /^data:image\/(png|jpeg|jpg|gif|webp);base64,[a-z0-9+/=]+$/i.test(normalized);
+        if (!isSafeHttp && !isSafeMailto && !isSafeRelative && !isSafeDataImg) {
+          el.removeAttribute(name);
+        }
       }
     });
   });

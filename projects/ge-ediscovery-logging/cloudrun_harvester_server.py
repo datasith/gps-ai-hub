@@ -43,7 +43,48 @@ class HarvesterRequestHandler(http.server.BaseHTTPRequestHandler):
             return
         self._send_json(404, {"error": "Not found"})
 
+    def _verify_oidc_caller(self) -> tuple[bool, str]:
+        """
+        Verifies the Google-signed OIDC Bearer token sent by Authenticated Pub/Sub Push
+        or Cloud Scheduler when running in Cloud Run (defense-in-depth behind Cloud Run IAM).
+        """
+        auth_header = self.headers.get("Authorization", "").strip()
+        if not auth_header.startswith("Bearer "):
+            if os.environ.get("K_SERVICE"):
+                return False, "Missing Authorization Bearer token"
+            return True, "local-dev"
+
+        token = auth_header.split(" ", 1)[1].strip()
+        parts = token.split(".")
+        if len(parts) != 3:
+            return False, "Malformed OIDC JWT"
+        try:
+            payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+        except Exception:
+            return False, "Unable to decode OIDC JWT claims"
+
+        iss = str(claims.get("iss") or "")
+        if iss not in ("https://accounts.google.com", "accounts.google.com"):
+            return False, "Untrusted OIDC issuer"
+
+        email = str(claims.get("email") or "").strip()
+        expected_sa = os.environ.get(
+            "EXPECTED_INVOKER_SA",
+            f"ge-ediscovery-harvester-sa@{ge_harvest.PROJECT_ID}.iam.gserviceaccount.com"
+            if ge_harvest.PROJECT_ID
+            else "",
+        )
+        if expected_sa and email and email != expected_sa:
+            return False, f"Unauthorized invoker principal: {email}"
+        return True, email or "verified-oidc-caller"
+
     def do_POST(self) -> None:
+        ok, caller_info = self._verify_oidc_caller()
+        if not ok:
+            self._send_json(403, {"error": "Forbidden", "reason": caller_info})
+            return
+
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -87,10 +128,10 @@ class HarvesterRequestHandler(http.server.BaseHTTPRequestHandler):
                 result = ge_harvest.harvest_single_event(log_entry)
                 print(f"[Pub/Sub Event Processed] {json.dumps(result)}")
                 self._send_json(200, result)
-            except Exception as e:
+            except Exception:
                 traceback.print_exc()
                 # Return 500 so Pub/Sub retries transient errors with exponential backoff
-                self._send_json(500, {"error": "Harvest execution failed", "detail": str(e)[:200]})
+                self._send_json(500, {"error": "Harvest execution failed"})
             return
 
         elif self.path == "/sweep":
@@ -134,9 +175,9 @@ class HarvesterRequestHandler(http.server.BaseHTTPRequestHandler):
                         "rows_loaded": len(all_rows),
                     },
                 )
-            except Exception as e:
+            except Exception:
                 traceback.print_exc()
-                self._send_json(500, {"error": "Sweep failed", "detail": str(e)[:200]})
+                self._send_json(500, {"error": "Sweep failed"})
             return
 
         self._send_json(404, {"error": "Not found"})

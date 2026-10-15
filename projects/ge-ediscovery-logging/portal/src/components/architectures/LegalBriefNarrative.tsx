@@ -93,6 +93,20 @@ type EvidenceSelection =
     };
 
 /**
+ * Strictly validates that an external URL uses an explicit http(s):// scheme
+ * (or internal /api/media? proxy path), preventing javascript:/data:/vbscript: URIs.
+ */
+function sanitizeExternalUrl(raw?: string | null): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  const normalized = trimmed.replace(/[\u0000-\u0020]+/g, '');
+  if (/^https?:\/\//i.test(normalized) || normalized.startsWith('/api/media?')) {
+    return trimmed;
+  }
+  return undefined;
+}
+
+/**
  * Splits model reasoning steps from final output.
  */
 function parseReasoningAndOutput(output: string, trace?: string): { reasoning: string; output: string } {
@@ -993,10 +1007,16 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
                   })()
                 : ((src.metadata as Record<string, any>) || {});
               const rawUrl = src.original_url || src.source_url || meta.webpageMetadata?.webpageUrl || meta.webpage_metadata?.webpageUrl || '';
-              const driveFileId = meta.driveFileId || meta.drive_file_id || meta.driveMetadata?.driveFileId;
+              const safeRawUrl = sanitizeExternalUrl(rawUrl);
+              const rawDriveFileId = String(meta.driveFileId || meta.drive_file_id || meta.driveMetadata?.driveFileId || '').trim();
+              const driveFileId = /^[A-Za-z0-9_-]+$/.test(rawDriveFileId) ? rawDriveFileId : '';
               const srcKindUpper = (src.source_kind || src.source_type || '').toUpperCase();
-              const isDrive = srcKindUpper === 'GOOGLE_DOC' || srcKindUpper === 'GOOGLE_SLIDES' || Boolean(driveFileId) || Boolean(rawUrl && /docs\.google\.com|drive\.google\.com/.test(rawUrl));
-              const isWeb = !isDrive && (srcKindUpper === 'WEB_URL' || srcKindUpper === 'YOUTUBE' || Boolean(rawUrl && /^https?:\/\//i.test(rawUrl)));
+              const isDrive =
+                srcKindUpper === 'GOOGLE_DOC' ||
+                srcKindUpper === 'GOOGLE_SLIDES' ||
+                Boolean(driveFileId) ||
+                Boolean(safeRawUrl && /^https:\/\/(docs|drive)\.google\.com\//i.test(safeRawUrl));
+              const isWeb = !isDrive && (srcKindUpper === 'WEB_URL' || srcKindUpper === 'YOUTUBE' || Boolean(safeRawUrl));
               const isDirectUpload = !isDrive && !isWeb;
               const crawlReason = meta.crawlFailureReason || meta.crawl_failure_reason;
               const isPdfSource = Boolean(
@@ -1010,12 +1030,12 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
               const resolvedHash = src.sha256_hash || meta.crc32cHash;
 
               // YouTube video embed ID
-              const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+              const ytMatch = (safeRawUrl || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
               const ytId = ytMatch ? ytMatch[1] : null;
 
               // Derive Drive Link
-              const driveLink = rawUrl || (driveFileId ? `https://drive.google.com/open?id=${driveFileId}` : undefined);
-              const driveExportLink = driveFileId ? `https://docs.google.com/document/d/${driveFileId}/export?format=pdf` : undefined;
+              const driveLink = safeRawUrl || (driveFileId ? `https://drive.google.com/open?id=${encodeURIComponent(driveFileId)}` : undefined);
+              const driveExportLink = driveFileId ? `https://docs.google.com/document/d/${encodeURIComponent(driveFileId)}/export?format=pdf` : undefined;
 
               return (
                 <article className={`p-6 rounded-2xl border space-y-4 shadow-xs ${currentTheme.cardClass}`}>
@@ -1092,19 +1112,19 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
                   {/* Mode 2: Web URLs */}
                   {isWeb && (
                     <div className="space-y-3">
-                      {rawUrl && (
+                      {safeRawUrl && (
                         <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${currentTheme.quoteBox}`}>
                           <div className="min-w-0 pr-2">
                             <span className={`text-[10px] font-mono uppercase tracking-wider block font-bold ${currentTheme.textMuted}`}>
                               Preserved Origin Link:
                             </span>
                             <span className="text-xs font-mono truncate block text-blue-600 dark:text-blue-400">
-                              {rawUrl}
+                              {safeRawUrl}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <a
-                              href={rawUrl}
+                              href={safeRawUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={`p-2 rounded-lg border flex items-center gap-1 text-xs font-sans font-medium transition ${currentTheme.cardClass} ${currentTheme.cardHoverClass}`}
@@ -1473,9 +1493,9 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
                 <div className={`p-3.5 rounded-xl border font-mono text-[10px] space-y-1.5 ${currentTheme.quoteBox}`}>
                   <div className="flex items-start gap-1.5 flex-wrap">
                     <span className={`font-semibold shrink-0 ${currentTheme.textMuted}`}>Source URI:</span>
-                    {selectedEvidence.citation.source_uri ? (
+                    {sanitizeExternalUrl(selectedEvidence.citation.source_uri) ? (
                       <a
-                        href={selectedEvidence.citation.source_uri}
+                        href={sanitizeExternalUrl(selectedEvidence.citation.source_uri)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-600 dark:text-blue-400 hover:underline break-all inline-flex items-center gap-1"
@@ -1484,7 +1504,7 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
                         <ExternalLink className="w-3 h-3 shrink-0" />
                       </a>
                     ) : (
-                      <span>-</span>
+                      <span>{selectedEvidence.citation.source_uri || '-'}</span>
                     )}
                   </div>
                   {Number(selectedEvidence.citation.confidence_score) > 0 && (
@@ -1495,15 +1515,15 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
                   )}
                 </div>
 
-                {selectedEvidence.citation.source_uri && (
+                {sanitizeExternalUrl(selectedEvidence.citation.source_uri) && (
                   <a
-                    href={selectedEvidence.citation.source_uri}
+                    href={sanitizeExternalUrl(selectedEvidence.citation.source_uri)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className={`w-full py-2.5 px-4 rounded-xl text-xs font-sans font-semibold transition flex items-center justify-center gap-1.5 shadow-2xs ${currentTheme.accentBtn}`}
                   >
                     <ExternalLink className="w-4 h-4" />
-                    <span>Open in {selectedEvidence.citation.source_uri.includes('mail.google.com') ? 'Google Mail' : 'Browser'}</span>
+                    <span>Open in {selectedEvidence.citation.source_uri?.includes('mail.google.com') ? 'Google Mail' : 'Browser'}</span>
                   </a>
                 )}
               </article>
@@ -1674,11 +1694,11 @@ export const LegalBriefNarrative: React.FC<LegalBriefNarrativeProps> = ({
                           <span className="text-emerald-600 dark:text-emerald-400 font-mono text-[9px] break-all">{selectedEvidence.crc32c}</span>
                         </div>
                       )}
-                      {selectedEvidence.web_url && (
+                      {sanitizeExternalUrl(selectedEvidence.web_url) && (
                         <div className="flex items-start gap-1.5 flex-wrap">
                           <span className={`font-semibold shrink-0 ${currentTheme.textMuted}`}>Origin URL:</span>
                           <a
-                            href={selectedEvidence.web_url}
+                            href={sanitizeExternalUrl(selectedEvidence.web_url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue-600 dark:text-blue-400 hover:underline break-all"

@@ -17,6 +17,11 @@ dependencies = [
     "google-cloud-aiplatform[evaluation,agent-engines]>=1.156.0,<2.0.0",
     "protobuf>=6.31.1,<7.0.0",
     "fpdf2>=2.8.8",
+    "nltk>=3.9.4",
+    "urllib3>=2.6.3",
+    "sqlparse>=0.5.4",
+    "oauthlib>=3.3.1",
+    "multidict>=6.1.0",
 ]
 requires-python = ">=3.11,<3.14"
 

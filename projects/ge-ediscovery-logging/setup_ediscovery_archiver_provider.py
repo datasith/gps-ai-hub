@@ -30,10 +30,8 @@ KMS_KEYRING = os.environ.get("KMS_KEYRING", "ge-ediscovery-kr").strip()
 KMS_KEY = os.environ.get("KMS_KEY", "ediscovery-archiver-jwt-key").strip()
 KMS_KEY_VERSION = os.environ.get("KMS_KEY_VERSION", "1").strip()
 KMS_KEY_ID = "archiver-kms-key-1"
-LOCAL_KEY_ID = "archiver-key-1"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PRIVATE_KEY_PATH = os.path.join(BASE_DIR, ".archiver_private_key.pem")
 JWKS_PATH = os.path.join(BASE_DIR, "archiver_jwks.json")
 
 
@@ -131,13 +129,6 @@ def ensure_kms_key_and_jwks() -> None:
     kms_mod_hex = mod_out.split("=", 1)[1].strip()
     keys_list = [jwk_from_modulus_hex(kms_mod_hex, KMS_KEY_ID)]
 
-    if os.path.exists(PRIVATE_KEY_PATH):
-        local_mod_out = subprocess.check_output(
-            ["openssl", "rsa", "-in", PRIVATE_KEY_PATH, "-modulus", "-noout"]
-        ).decode("ascii").strip()
-        if local_mod_out.startswith("Modulus="):
-            keys_list.append(jwk_from_modulus_hex(local_mod_out.split("=", 1)[1], LOCAL_KEY_ID))
-
     jwks = {"keys": keys_list}
     with open(JWKS_PATH, "w", encoding="utf-8") as f:
         json.dump(jwks, f, indent=2)
@@ -146,6 +137,7 @@ def ensure_kms_key_and_jwks() -> None:
 
 def ensure_oidc_provider() -> None:
     issuer_uri = f"https://ediscovery.{PROJECT_ID}.internal"
+    attr_condition = f"assertion.iss == '{issuer_uri}' && assertion.aud == '{CLIENT_ID}' && assertion.sub != ''"
     print(f"[4/4] Ensuring OIDC provider '{PROVIDER_ID}' in workforce pool '{WORKFORCE_POOL_ID}'...")
     desc = subprocess.run(
         [
@@ -160,7 +152,7 @@ def ensure_oidc_provider() -> None:
     )
 
     if desc.returncode == 0:
-        print(f"      Provider '{PROVIDER_ID}' exists; updating JWKS and attribute mapping...")
+        print(f"      Provider '{PROVIDER_ID}' exists; updating JWKS, attribute mapping, and attribute condition...")
         subprocess.run(
             [
                 "gcloud", "iam", "workforce-pools", "providers", "update-oidc",
@@ -170,7 +162,8 @@ def ensure_oidc_provider() -> None:
                 f"--issuer-uri={issuer_uri}",
                 f"--client-id={CLIENT_ID}",
                 f"--jwk-json-path={JWKS_PATH}",
-                "--attribute-mapping=google.subject=assertion.sub,google.display_name=assertion.sub,google.groups=assertion.groups",
+                "--attribute-mapping=google.subject=assertion.sub,google.display_name=assertion.sub",
+                f"--attribute-condition={attr_condition}",
                 "--web-sso-response-type=id-token",
                 "--web-sso-assertion-claims-behavior=only-id-token-claims",
             ],
@@ -189,7 +182,8 @@ def ensure_oidc_provider() -> None:
                 f"--issuer-uri={issuer_uri}",
                 f"--client-id={CLIENT_ID}",
                 f"--jwk-json-path={JWKS_PATH}",
-                "--attribute-mapping=google.subject=assertion.sub,google.display_name=assertion.sub,google.groups=assertion.groups",
+                "--attribute-mapping=google.subject=assertion.sub,google.display_name=assertion.sub",
+                f"--attribute-condition={attr_condition}",
                 "--web-sso-response-type=id-token",
                 "--web-sso-assertion-claims-behavior=only-id-token-claims",
             ],

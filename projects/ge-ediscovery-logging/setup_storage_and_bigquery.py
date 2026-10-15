@@ -38,22 +38,29 @@ def ensure_gcs_bucket() -> None:
         text=True,
     )
     if check.returncode != 0:
-        print(f"      Creating bucket {GCS_BUCKET} in US with uniform bucket-level access...")
+        print(f"      Creating bucket {GCS_BUCKET} in US with uniform bucket-level access and public access prevention...")
         subprocess.run(
             [
                 "gcloud", "storage", "buckets", "create", GCS_BUCKET,
                 f"--project={PROJECT_ID}",
                 "--location=US",
                 "--uniform-bucket-level-access",
+                "--public-access-prevention",
             ],
             check=True,
         )
     else:
         print(f"      Bucket {GCS_BUCKET} already exists.")
 
-    print("      Enabling object versioning on bucket...")
+    print("      Enforcing object versioning, uniform bucket-level access, and public access prevention on bucket...")
     subprocess.run(
-        ["gcloud", "storage", "buckets", "update", GCS_BUCKET, "--versioning", f"--project={PROJECT_ID}"],
+        [
+            "gcloud", "storage", "buckets", "update", GCS_BUCKET,
+            "--versioning",
+            "--uniform-bucket-level-access",
+            "--public-access-prevention",
+            f"--project={PROJECT_ID}",
+        ],
         check=True,
     )
 
@@ -106,8 +113,9 @@ def ensure_logging_sink() -> None:
     print(f"[4/5] Ensuring Cloud Logging sink '{SINK_NAME}' -> BigQuery dataset '{BQ_DATASET}'...")
     destination = f"bigquery.googleapis.com/projects/{PROJECT_ID}/datasets/{BQ_DATASET}"
     log_filter = (
+        f'resource.type="consumed_api" AND ('
         f'logName="projects/{PROJECT_ID}/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity" '
-        f'OR logName="projects/{PROJECT_ID}/logs/discoveryengine.googleapis.com%2Fnotebooklm_enterprise_user_activity"'
+        f'OR logName="projects/{PROJECT_ID}/logs/discoveryengine.googleapis.com%2Fnotebooklm_enterprise_user_activity")'
     )
 
     sink_check = subprocess.run(

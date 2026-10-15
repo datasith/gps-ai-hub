@@ -36,7 +36,12 @@ def main() -> None:
     parser.add_argument("--bucket-name", default="", help="GCS compliance archive bucket (default: <project_id>-ge-ediscovery)")
     parser.add_argument("--bq-dataset", default="ge_ediscovery", help="BigQuery dataset name (default: ge_ediscovery)")
     parser.add_argument("--reviewer-email", default="", help="Optional default reviewer email shown in portal header")
-    parser.add_argument("--iap", action="store_true", help="Enable native Cloud Run Identity-Aware Proxy (IAP) for direct browser Google Sign-In")
+    parser.add_argument(
+        "--iap",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable native Cloud Run Identity-Aware Proxy (IAP) for direct browser Google Sign-In (default: True; use --no-iap to disable)",
+    )
     parser.add_argument("--iap-accessor", default="", help="Optional IAM principal to grant roles/iap.httpsResourceAccessor (e.g. domain:example.com or user:reviewer@example.com)")
     args = parser.parse_args()
 
@@ -45,8 +50,44 @@ def main() -> None:
         sys.exit(1)
 
     bucket_name = args.bucket_name or f"{args.project_id}-ge-ediscovery"
-    sa_email = f"ge-ediscovery-harvester-sa@{args.project_id}.iam.gserviceaccount.com"
+    sa_name = "ge-ediscovery-portal-sa"
+    sa_email = f"{sa_name}@{args.project_id}.iam.gserviceaccount.com"
     portal_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portal")
+
+    print("======================================================================")
+    print(f"Provisioning Dedicated Read-Only Service Account ({sa_email})")
+    print("======================================================================")
+    sa_check = subprocess.run(
+        ["gcloud", "iam", "service-accounts", "describe", sa_email, f"--project={args.project_id}"],
+        capture_output=True,
+        text=True,
+    )
+    if sa_check.returncode != 0:
+        run_cmd([
+            "gcloud", "iam", "service-accounts", "create", sa_name,
+            "--display-name=GE eDiscovery Read-Only Compliance Portal SA",
+            f"--project={args.project_id}",
+        ])
+
+    # Grant strictly read-only permissions on GCS archive bucket and BigQuery (no KMS signing or write roles)
+    run_cmd([
+        "gcloud", "storage", "buckets", "add-iam-policy-binding", f"gs://{bucket_name}",
+        f"--member=serviceAccount:{sa_email}",
+        "--role=roles/storage.objectViewer",
+        f"--project={args.project_id}",
+    ])
+    for role in [
+        "roles/bigquery.dataViewer",
+        "roles/bigquery.jobUser",
+        "roles/logging.logWriter",
+    ]:
+        run_cmd([
+            "gcloud", "projects", "add-iam-policy-binding", args.project_id,
+            f"--member=serviceAccount:{sa_email}",
+            f"--role={role}",
+            "--condition=None",
+            "--quiet",
+        ])
 
     # Ensure all file timestamps in portal/ are >= 1980 for Cloud Build ZIP packaging
     import time
