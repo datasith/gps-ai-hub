@@ -25,6 +25,15 @@ Welcome to the **Google Cloud GPS AI Hub** repository (`gps-ai-hub`). This repos
 
 ---
 
+## 📊 Gemini Enterprise Token Consumption & WIF Usage Telemetry (`/ge-token-tracking`)
+
+- 📈 **[Gemini Enterprise Token Consumption, Model Breakdown & Workforce Identity (WIF) Usage Dashboard](https://github.com/peterfishergcp/gps-ai-hub/tree/main/projects/ge-token-tracking)**:
+  - Lightweight, zero-KMS, zero-Cloud-Storage token tracking and FinOps chargeback solution derived from `ge-ediscovery-logging`, purpose-built for higher-education institutions, public-sector agencies, and enterprises that need per-user and per-model token observability without full eDiscovery file archival.
+  - Automates OpenTelemetry trace enablement (`enable_ge_observability.py`, supporting `--no-sensitive-logging` for FERPA/privacy-sensitive environments) and joins Cloud Trace (`trace_link._AllSpans`) with Gemini Enterprise activity logs in BigQuery (`v_gemini_token_usage_by_user` and `v_token_usage_summary_by_principal`).
+  - Includes a focused **Cloud Run Token Consumption & WIF Usage Dashboard (`dashboard/`)** with multi-instance filtering (`ALL` or per `engine_id`), 4 executive KPI cards, Chart.js visualizations (**Token Usage by Model**, **Token Usage by WIF Principal**, **Daily Token Consumption Trend**), a searchable WIF Identity Attribution table, and 1-click **CSV & HTML Chargeback Reports**.
+
+---
+
 ## 🔎 Gemini Enterprise eDiscovery, Compliance Review Portal & Microsoft Purview Integration (`/ge-ediscovery-logging`)
 
 - 🗄️ **[Gemini Enterprise Server-Side eDiscovery Capture, Cloud Storage Archival, BigQuery Forensic Reporting, Compliance Review Portal & Microsoft Purview eDiscovery Connector](https://github.com/peterfishergcp/gps-ai-hub/tree/main/projects/ge-ediscovery-logging)**:
