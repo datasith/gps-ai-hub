@@ -2,6 +2,10 @@
 
 > **Disclaimer**: This repository and its contents are provided for illustration and educational purposes only as example code. This is not an official Google product or officially supported Google Cloud project. This code is provided as-is for demonstration purposes and is NOT intended or supported for production workloads.
 
+## Contributing & Acknowledgments
+
+- **Cisco Zabala** — Created the updated `output-engineer` skill and v2 architecture proposal, adding the **3-Stage Blind Review Council**, the **reusable 6-Tab Interactive HTML Review Canvas**, and the **quantitative benchmark evaluation & unit test suite**.
+
 ---
 
 ## Overview: What is Output Engineering?
