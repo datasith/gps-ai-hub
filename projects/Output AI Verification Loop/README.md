@@ -4,7 +4,7 @@
 
 ## Contributing & Acknowledgments
 
-- **Cisco Zabala** — Created the updated `output-engineer` skill and v2 architecture proposal, adding the **3-Stage Blind Review Council**, the **reusable 6-Tab Interactive HTML Review Canvas**, and the **quantitative benchmark evaluation & unit test suite**.
+Special thanks to **Cisco Zabala** for his contributions — creating the updated `output-engineer` skill and v2 architecture proposal, which adds the **3-Stage Blind Review Council**, the **reusable 6-Tab Interactive HTML Review Canvas**, and the **quantitative benchmark evaluation & unit test suite**.
 
 ---
 
