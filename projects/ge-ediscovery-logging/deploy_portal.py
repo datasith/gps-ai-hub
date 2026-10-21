@@ -30,7 +30,7 @@ def run_cmd(cmd: list[str]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deploy the Gemini Enterprise eDiscovery Review Portal to Cloud Run.")
-    parser.add_argument("--project-id", default=DEFAULT_PROJECT_ID, help="Google Cloud Project ID")
+    parser.add_argument("--project-id", "--project", dest="project_id", default=DEFAULT_PROJECT_ID, help="Google Cloud Project ID")
     parser.add_argument("--region", default=DEFAULT_REGION, help="Cloud Run region (default: us-central1)")
     parser.add_argument("--service-name", default=SERVICE_NAME, help="Cloud Run service name (default: ge-ediscovery-portal)")
     parser.add_argument("--bucket-name", default="", help="GCS compliance archive bucket (default: <project_id>-ge-ediscovery)")

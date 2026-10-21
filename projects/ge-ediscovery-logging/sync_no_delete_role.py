@@ -302,6 +302,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--project",
+        "--project-id",
+        dest="project",
         default=os.environ.get("GCP_PROJECT_ID", "").strip(),
         help="Google Cloud Project ID hosting Gemini Enterprise",
     )

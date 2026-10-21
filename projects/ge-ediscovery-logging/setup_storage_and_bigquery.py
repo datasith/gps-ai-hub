@@ -14,6 +14,7 @@ Usage:
   python3 setup_storage_and_bigquery.py
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -518,8 +519,41 @@ def ensure_bq_views_and_functions() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Provision Cloud Storage archive bucket, BigQuery dataset/table, Cloud Logging sink, and analytical views."
+    )
+    parser.add_argument(
+        "--project-id",
+        "--project",
+        dest="project_id",
+        default=PROJECT_ID,
+        help="Google Cloud Project ID (or set GCP_PROJECT_ID)",
+    )
+    parser.add_argument(
+        "--bucket-name",
+        dest="bucket_name",
+        default="",
+        help="Cloud Storage bucket name (default: <project_id>-ge-ediscovery)",
+    )
+    parser.add_argument(
+        "--bq-dataset",
+        dest="bq_dataset",
+        default=BQ_DATASET,
+        help="BigQuery dataset name (default: ge_ediscovery)",
+    )
+    args = parser.parse_args()
+    PROJECT_ID = (args.project_id or "").strip()
     if not PROJECT_ID or PROJECT_ID.startswith("<"):
-        sys.exit("ERROR: Please set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
+        sys.exit("ERROR: Please pass --project-id or set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
+
+    GCS_BUCKET_NAME = (
+        args.bucket_name.strip()
+        or os.environ.get("GCS_BUCKET_NAME", "").strip()
+        or f"{PROJECT_ID}-ge-ediscovery"
+    )
+    GCS_BUCKET = f"gs://{GCS_BUCKET_NAME}" if not GCS_BUCKET_NAME.startswith("gs://") else GCS_BUCKET_NAME
+    BQ_DATASET = (args.bq_dataset or "ge_ediscovery").strip()
+
     ensure_gcs_bucket()
     ensure_bq_dataset_and_table()
     ensure_logging_sink()

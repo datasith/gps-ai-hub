@@ -1889,7 +1889,7 @@ def harvest_single_event(log_entry: dict) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Harvest Gemini Enterprise sessions, NotebookLM notebooks, and files to GCS & BigQuery.")
-    parser.add_argument("--project-id", default=PROJECT_ID, help="Google Cloud Project ID")
+    parser.add_argument("--project-id", "--project", dest="project_id", default=PROJECT_ID, help="Google Cloud Project ID")
     parser.add_argument("--workforce-pool-id", default=WORKFORCE_POOL_ID, help="Workforce Identity Pool ID")
     parser.add_argument("--bucket-name", default="", help="Cloud Storage bucket name (default: <project_id>-ge-ediscovery)")
     parser.add_argument("--hours", type=int, default=168, help="Cloud Logging lookback window in hours (default: 168)")

@@ -342,7 +342,7 @@ def check_8_no_delete_custom_role_and_delete_blocked(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run E2E verification for Gemini Enterprise eDiscovery pipeline.")
-    parser.add_argument("--project-id", default=os.environ.get("GCP_PROJECT_ID", ""), help="Google Cloud Project ID")
+    parser.add_argument("--project-id", "--project", dest="project_id", default=os.environ.get("GCP_PROJECT_ID", ""), help="Google Cloud Project ID")
     parser.add_argument(
         "--workforce-pool-id",
         default=os.environ.get("WORKFORCE_POOL_ID", ""),

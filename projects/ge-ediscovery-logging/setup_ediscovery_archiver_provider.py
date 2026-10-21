@@ -13,6 +13,7 @@ Usage:
   python3 setup_ediscovery_archiver_provider.py
 """
 
+import argparse
 import base64
 import json
 import os
@@ -285,10 +286,37 @@ def ensure_kms_key_iam_and_monitoring() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Provision Cloud KMS asymmetric signing key and register the ediscovery-archiver OIDC provider in a Workforce Identity Pool."
+    )
+    parser.add_argument(
+        "--project-id",
+        "--project",
+        dest="project_id",
+        default=PROJECT_ID,
+        help="Google Cloud Project ID (or set GCP_PROJECT_ID)",
+    )
+    parser.add_argument(
+        "--workforce-pool-id",
+        dest="workforce_pool_id",
+        default=WORKFORCE_POOL_ID,
+        help="Workforce Identity Pool ID (or set WORKFORCE_POOL_ID)",
+    )
+    parser.add_argument(
+        "--provider-id",
+        dest="provider_id",
+        default=PROVIDER_ID,
+        help="OIDC Provider ID (default: ediscovery-archiver)",
+    )
+    args = parser.parse_args()
+    PROJECT_ID = (args.project_id or "").strip()
+    WORKFORCE_POOL_ID = (args.workforce_pool_id or "").strip()
+    PROVIDER_ID = (args.provider_id or "ediscovery-archiver").strip()
+
     if not PROJECT_ID or PROJECT_ID.startswith("<"):
-        sys.exit("ERROR: Please set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
+        sys.exit("ERROR: Please pass --project-id or set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
     if not WORKFORCE_POOL_ID or WORKFORCE_POOL_ID.startswith("<"):
-        sys.exit("ERROR: Please set WORKFORCE_POOL_ID (e.g., export WORKFORCE_POOL_ID='your-workforce-pool-id').")
+        sys.exit("ERROR: Please pass --workforce-pool-id or set WORKFORCE_POOL_ID (e.g., export WORKFORCE_POOL_ID='your-workforce-pool-id').")
     try:
         ensure_kms_key_and_jwks()
         ensure_oidc_provider()

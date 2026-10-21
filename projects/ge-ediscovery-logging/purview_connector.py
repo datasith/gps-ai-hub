@@ -818,7 +818,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Sync harvested Gemini Enterprise turns & binary attachments to Microsoft Purview eDiscovery."
     )
-    parser.add_argument("--project-id", default=os.environ.get("GCP_PROJECT_ID", ""), help="Google Cloud Project ID")
+    parser.add_argument("--project-id", "--project", dest="project_id", default=os.environ.get("GCP_PROJECT_ID", ""), help="Google Cloud Project ID")
     parser.add_argument(
         "--engine-id",
         default=os.environ.get("GE_ENGINE_ID", ""),

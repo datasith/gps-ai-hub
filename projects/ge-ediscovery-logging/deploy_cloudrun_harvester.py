@@ -19,6 +19,7 @@ Usage:
   python3 deploy_cloudrun_harvester.py
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -53,10 +54,45 @@ def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
 
 
 def main() -> None:
+    global PROJECT_ID, WORKFORCE_POOL_ID, REGION, SERVICE_NAME
+    parser = argparse.ArgumentParser(
+        description="Deploy the Real-Time Event-Driven GE eDiscovery Harvester to Cloud Run and wire up Pub/Sub push."
+    )
+    parser.add_argument(
+        "--project-id",
+        "--project",
+        dest="project_id",
+        default=PROJECT_ID,
+        help="Google Cloud Project ID (or set GCP_PROJECT_ID)",
+    )
+    parser.add_argument(
+        "--workforce-pool-id",
+        dest="workforce_pool_id",
+        default=WORKFORCE_POOL_ID,
+        help="Workforce Identity Pool ID (or set WORKFORCE_POOL_ID)",
+    )
+    parser.add_argument(
+        "--region",
+        dest="region",
+        default=REGION,
+        help="Cloud Run region (default: us-central1)",
+    )
+    parser.add_argument(
+        "--service-name",
+        dest="service_name",
+        default=SERVICE_NAME,
+        help="Cloud Run service name (default: ge-ediscovery-harvester)",
+    )
+    args = parser.parse_args()
+    PROJECT_ID = (args.project_id or "").strip()
+    WORKFORCE_POOL_ID = (args.workforce_pool_id or "").strip()
+    REGION = (args.region or "us-central1").strip()
+    SERVICE_NAME = (args.service_name or "ge-ediscovery-harvester").strip()
+
     if not PROJECT_ID or PROJECT_ID.startswith("<"):
-        sys.exit("ERROR: Please set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
+        sys.exit("ERROR: Please pass --project-id or set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
     if not WORKFORCE_POOL_ID or WORKFORCE_POOL_ID.startswith("<"):
-        sys.exit("ERROR: Please set WORKFORCE_POOL_ID (e.g., export WORKFORCE_POOL_ID='your-workforce-pool-id').")
+        sys.exit("ERROR: Please pass --workforce-pool-id or set WORKFORCE_POOL_ID (e.g., export WORKFORCE_POOL_ID='your-workforce-pool-id').")
 
     sa_email = f"{SA_NAME}@{PROJECT_ID}.iam.gserviceaccount.com"
     gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME") or f"{PROJECT_ID}-ge-ediscovery"

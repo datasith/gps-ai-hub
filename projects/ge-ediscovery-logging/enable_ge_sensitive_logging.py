@@ -8,6 +8,7 @@ Usage:
   python3 enable_ge_sensitive_logging.py
 """
 
+import argparse
 import json
 import os
 import ssl
@@ -161,8 +162,22 @@ def enable_agent_sensitive_logging(token: str, loc: str, prefix: str, engine_id:
 
 
 def main() -> None:
+    global PROJECT_ID
+    parser = argparse.ArgumentParser(
+        description="Enable observabilityEnabled and sensitiveLoggingEnabled across all Gemini Enterprise engines, custom Agents, and NotebookLM Enterprise locations."
+    )
+    parser.add_argument(
+        "--project-id",
+        "--project",
+        dest="project_id",
+        default=PROJECT_ID,
+        help="Google Cloud Project ID (or set GCP_PROJECT_ID)",
+    )
+    args = parser.parse_args()
+    PROJECT_ID = (args.project_id or "").strip()
+
     if not PROJECT_ID or PROJECT_ID.startswith("<"):
-        sys.exit("ERROR: Please set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
+        sys.exit("ERROR: Please pass --project-id or set GCP_PROJECT_ID (e.g., export GCP_PROJECT_ID='your-project-id').")
 
     token = get_gcloud_token()
     total_updated = 0

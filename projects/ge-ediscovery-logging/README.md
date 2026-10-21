@@ -160,11 +160,14 @@ Enabling `observabilityConfig` on a Gemini Enterprise **Engine** only enables lo
 | [`scripts/replay-dlq.sh`](./scripts/replay-dlq.sh) | Inspects (`--peek`) or republishes (`--replay`) dead-lettered events from `ge-ediscovery-dlq-hold` back to `ge-ediscovery-events` |
 | [`test_ge_ediscovery_e2e.py`](./test_ge_ediscovery_e2e.py) | End-to-end verification suite (runs 8 automated compliance, security, `DeleteSession -> HTTP 403`, and BigQuery checks) |
 | [`sites-search-agent/`](./sites-search-agent/) | Example ADK Agent (`sites_search_agent`) built with `agents-cli` and `fpdf2` that searches Google Sites and generates binary 1–2 page PDF summary artifacts (`AI_GENERATED`) captured by `ge_harvest.py` |
+| [`AGENTS.md`](./AGENTS.md) | Turnkey AGY CLI customer deployment playbook (auto-discovery commands, IAM preflight checks, split Org/Project Admin handling, and troubleshooting) |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Deep-dive technical architecture, protocol specifications, Cloud KMS + Cloud Run design, Compliance Review Portal API, and production hardening guide |
 
 ---
 
 ## Quickstart & Installation Guide
+
+> **Deploying with AGY CLI at a Customer Site?** See [`AGENTS.md`](./AGENTS.md) for the automated AGY CLI deployment playbook, environment auto-discovery commands, preflight IAM permission test, and Org-vs-Project admin guidance.
 
 ### Prerequisites
 
@@ -212,7 +215,9 @@ python3 enable_ge_sensitive_logging.py --project-id "$GCP_PROJECT_ID"
 Run `setup_ediscovery_archiver_provider.py` to create the Cloud KMS KeyRing (`ge-ediscovery-kr`) and Asymmetric Signing Key (`ediscovery-archiver-jwt-key`, `RSA_SIGN_PKCS1_2048_SHA256`), export its public key to `archiver_jwks.json`, and register the `ediscovery-archiver` OIDC provider in your Workforce Identity Pool:
 
 ```bash
-python3 setup_ediscovery_archiver_provider.py
+python3 setup_ediscovery_archiver_provider.py \
+  --project-id "$GCP_PROJECT_ID" \
+  --workforce-pool-id "$WORKFORCE_POOL_ID"
 ```
 
 ---
@@ -237,7 +242,9 @@ python3 setup_storage_and_bigquery.py --project-id "$GCP_PROJECT_ID"
 Run `deploy_cloudrun_harvester.py` to deploy the `ge-ediscovery-harvester` Cloud Run service (`--no-allow-unauthenticated`), grant `roles/cloudkms.signerVerifier` on `ediscovery-archiver-jwt-key` to `ge-ediscovery-harvester-sa`, and wire up the real-time Cloud Logging $\rightarrow$ Pub/Sub push pipeline (`ge-ediscovery-pubsub-sink` $\rightarrow$ `ge-ediscovery-events` $\rightarrow$ `ge-ediscovery-push-sub` with dead-letter topic `ge-ediscovery-dlq` and hold subscription `ge-ediscovery-dlq-hold`):
 
 ```bash
-python3 deploy_cloudrun_harvester.py
+python3 deploy_cloudrun_harvester.py \
+  --project-id "$GCP_PROJECT_ID" \
+  --workforce-pool-id "$WORKFORCE_POOL_ID"
 ```
 
 You can also run `ge_harvest.py` directly from the CLI at any time for an on-demand historical sweep:
@@ -335,6 +342,7 @@ For enterprises using **Microsoft Purview eDiscovery (Standard / Premium)** and 
 python3 purview_connector.py \
   --project-id "$GCP_PROJECT_ID" \
   --tenant-id "$MS_TENANT_ID" \
+  --client-id "$MS_CLIENT_ID" \
   --device-login \
   --limit 25
 
