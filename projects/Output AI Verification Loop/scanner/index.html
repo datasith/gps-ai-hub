@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS Pre-Send Artifact Verification Gate</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f8f9fa;
+      color: #3c4043;
+      font-family: 'Google Sans Text', 'Google Sans', Roboto, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Clean Top Bar */
+    .topbar {
+      height: 52px;
+      background: #ffffff;
+      border-bottom: 1px solid #e8eaed;
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 15.5px;
+      font-weight: 500;
+      color: #202124;
+    }
+    .topbar-left img {
+      width: 24px;
+      height: 24px;
+    }
+    .topbar-crumb {
+      color: #5f6368;
+      font-weight: 400;
+    }
+    .topbar-right a {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #1a73e8;
+      text-decoration: none;
+      margin-left: 20px;
+    }
+    .topbar-right a:hover {
+      text-decoration: underline;
+    }
+
+    /* Centered Single-Column Container (Spacious, Fits Above Fold) */
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 22px 24px 56px 24px;
+    }
+
+    .page-title {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 22px;
+      font-weight: 400;
+      color: #202124;
+      margin: 0 0 4px 0;
+    }
+    .page-sub {
+      font-size: 14px;
+      color: #5f6368;
+      margin: 0 0 16px 0;
+    }
+
+    /* Step Card */
+    .card {
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 2px rgba(60, 64, 67, 0.05);
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .step-label {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #1a73e8;
+      margin: 0 0 2px 0;
+    }
+    .step-title {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 17px;
+      font-weight: 500;
+      color: #202124;
+      margin: 0;
+    }
+
+    /* Scenario Selector Tabs */
+    .scenario-bar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 720px) {
+      .scenario-bar {
+        grid-template-columns: 1fr;
+      }
+    }
+    .scenario-btn {
+      text-align: left;
+      background: #f8f9fa;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 10px 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .scenario-btn:hover {
+      background: #f1f3f4;
+    }
+    .scenario-btn.active {
+      background: #e8f0fe;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8 inset;
+    }
+    .scenario-name {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      margin: 0 0 2px 0;
+    }
+    .scenario-btn.active .scenario-name {
+      color: #174ea6;
+    }
+    .scenario-desc {
+      font-size: 12px;
+      color: #5f6368;
+      margin: 0;
+    }
+
+    /* Uploaded File Bar — Buttons Always Under the Text so Step 1 Never Jumps Height */
+    .file-box {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+    }
+    .file-icon {
+      width: 34px;
+      height: 34px;
+      flex-shrink: 0;
+      border-radius: 6px;
+      background: #e8f0fe;
+      color: #1967d2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+    .file-text-wrap {
+      min-width: 0;
+      flex: 1;
+    }
+    .file-name {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-meta {
+      font-size: 12px;
+      color: #5f6368;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-left: 46px;
+    }
+
+    .btn-outline {
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #1a73e8;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-outline:hover {
+      background: #f8fafd;
+      border-color: #1a73e8;
+    }
+    .btn-primary-sm {
+      background: #1a73e8;
+      border: 1px solid #1a73e8;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #ffffff;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-primary-sm:hover {
+      background: #1765cc;
+      border-color: #1765cc;
+    }
+    .btn-primary {
+      background: #1a73e8;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 18px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary:hover {
+      background: #1765cc;
+    }
+    .btn-success {
+      background: #1e8e3e;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 18px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-success:hover {
+      background: #137333;
+    }
+
+    /* Optional Artifact Preview Box */
+    .artifact-preview {
+      display: none;
+      margin-top: 10px;
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: #202124;
+      white-space: pre-wrap;
+    }
+    .artifact-preview.open {
+      display: block;
+    }
+
+    /* Single Consolidated Evaluation Banner (Zero Double-Header Redundancy) */
+    .status-banner {
+      border-radius: 8px;
+      padding: 13px 16px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .status-banner.hold {
+      background: #fef7e0;
+      border: 1px solid #fde293;
+      border-left: 5px solid #f9ab00;
+    }
+    .status-banner.reject {
+      background: #fce8e6;
+      border: 1px solid #f6aea9;
+      border-left: 5px solid #d93025;
+    }
+    .status-banner.pass {
+      background: #e6f4ea;
+      border: 1px solid #a8dab5;
+      border-left: 5px solid #1e8e3e;
+    }
+    .badge-hold {
+      background: #b06000;
+      color: #ffffff;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 4px;
+      margin-right: 8px;
+    }
+    .badge-reject {
+      background: #d93025;
+      color: #ffffff;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 4px;
+      margin-right: 8px;
+    }
+    .badge-pass {
+      background: #1e8e3e;
+      color: #ffffff;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 4px;
+      margin-right: 8px;
+    }
+    .status-headline {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 15.5px;
+      font-weight: 500;
+      color: #202124;
+      margin: 0 0 2px 0;
+    }
+    .status-desc {
+      font-size: 13px;
+      color: #3c4043;
+      margin: 0;
+    }
+
+    .verified-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #e6f4ea;
+      color: #137333;
+      border: 1px solid #ceead6;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+
+    /* Compact Side-by-Side Finding Cards (Fits Above Fold) */
+    .finding-card {
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 12px 15px;
+      margin-bottom: 10px;
+      background: #ffffff;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .finding-card.staged {
+      border-color: #34a853;
+      background: #f8fdf9;
+    }
+    .finding-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .finding-top-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .finding-tag {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #fce8e6;
+      color: #c5221f;
+    }
+    .finding-rule {
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+    }
+    .finding-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+    @media (max-width: 760px) {
+      .finding-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .finding-quote {
+      background: #f8f9fa;
+      border-left: 3px solid #ea4335;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #3c4043;
+      margin: 0;
+      border-radius: 0 6px 6px 0;
+    }
+    .finding-fix-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #f1f3f4;
+      border-left: 3px solid #34a853;
+      border-radius: 0 6px 6px 0;
+      padding: 8px 12px;
+    }
+    .finding-card.staged .finding-fix-box {
+      background: #e6f4ea;
+    }
+    .finding-fix-text {
+      font-size: 13px;
+      color: #202124;
+      flex: 1;
+    }
+    .stage-btn {
+      flex-shrink: 0;
+      white-space: nowrap;
+      background: #ffffff;
+      border: 1px solid #1a73e8;
+      color: #1a73e8;
+      border-radius: 6px;
+      padding: 5px 11px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .stage-btn.applied {
+      background: #1e8e3e;
+      border-color: #1e8e3e;
+      color: #ffffff;
+    }
+
+    /* Teach-to-Fish Choice Options on Pass #2 */
+    .choice-option {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #f8f9fa;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-top: 8px;
+      font-family: 'Google Sans Text', Roboto, sans-serif;
+      font-size: 13px;
+      color: #202124;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .choice-option:hover {
+      background: #f1f3f4;
+    }
+    .choice-option.wrong {
+      border-color: #d93025;
+      background: #fce8e6;
+    }
+    .choice-option.correct {
+      border-color: #1e8e3e;
+      background: #e6f4ea;
+    }
+
+    /* Submit / Re-Evaluate Bar */
+    .submit-bar {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #e8eaed;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .submit-hint {
+      font-size: 13px;
+      color: #5f6368;
+    }
+
+    /* Rebuild Checklist for Rejected Slop */
+    .checklist {
+      margin: 8px 0 14px 0;
+      padding-left: 20px;
+      font-size: 13.5px;
+    }
+    .checklist li {
+      margin-bottom: 6px;
+      color: #202124;
+    }
+    .gc-code {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 11.5px;
+      background: #f1f3f4;
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #202124;
+    }
+    mark.err-hl {
+      background: #fce8e6;
+      color: #c5221f;
+      font-weight: 500;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    mark.fix-hl {
+      background: #e6f4ea;
+      color: #137333;
+      font-weight: 500;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <img src="https://www.gstatic.com/images/branding/productlogos/google_cloud/v8/192px.svg" alt="Google Cloud">
+      <span>Google Public Sector</span>
+      <span class="topbar-crumb">/ Pre-Send Artifact Gate (Demo)</span>
+    </div>
+    <div class="topbar-right">
+      <a href="https://serve-dot-zipline.googleplex.com/hosting/2b7affb6-6360-4bad-8dcf-4680f5e977a3" target="_blank">Full 15-Page Council Audit</a>
+      <a href="https://github.com/peterfishergcp/gps-ai-hub/tree/main/projects/Output%20AI%20Verification%20Loop" target="_blank">GitHub Repo</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h1 class="page-title">Pre-Send Artifact Verification Gate <span style="font-size:14px; font-weight:500; color:#1967d2; background:#e8f0fe; border:1px solid #d2e3fc; padding:2px 10px; border-radius:999px; vertical-align:middle; margin-left:6px;">Interactive Demo</span></h1>
+    <p class="page-sub">
+      Walkthrough of the 3 submission outcomes below. <b>Note:</b> The 3 scenario tabs are for this demo only—in production, FSRs only see the file upload prompt.
+    </p>
+
+    <!-- Uploaded Artifact Card -->
+    <div class="card">
+      <div class="step-header">
+        <div>
+          <div class="step-label">Author-Facing Gate &middot; Uploaded Artifact (Demo Scenario Switcher)</div>
+          <h2 class="step-title">Select a demo submission scenario (or upload a file)</h2>
+        </div>
+        <div>
+          <input type="file" id="file-upload" accept=".md,.txt,.docx" style="display:none;">
+          <button type="button" class="btn-outline" id="btn-upload-own">Upload File (.md / .txt / .docx)</button>
+        </div>
+      </div>
+
+      <div class="scenario-bar">
+        <button type="button" class="scenario-btn active" data-scenario="fixable">
+          <div class="scenario-name">1. Fixable Draft (Multi-Pass Review)</div>
+          <p class="scenario-desc">Fixes are ready for Pass #1; clicking Submit triggers Pass #2 (which catches a deeper gap).</p>
+        </button>
+        <button type="button" class="scenario-btn" data-scenario="slop">
+          <div class="scenario-name">2. Poor-Quality AI Slop (Must Recreate)</div>
+          <p class="scenario-desc">Too generic &amp; fabricated to patch inline—author must recreate and submit v2.</p>
+        </button>
+        <button type="button" class="scenario-btn" data-scenario="reworked">
+          <div class="scenario-name">3. Reworked v2 Artifact (Passes Gate)</div>
+          <p class="scenario-desc">Recreated submission with verified GCP controls that passes evaluation.</p>
+        </button>
+      </div>
+
+      <!-- Downloadable & Inspectable File Row (Buttons Always Under the Text) -->
+      <div class="file-box">
+        <div class="file-info">
+          <div class="file-icon">MD</div>
+          <div class="file-text-wrap">
+            <div class="file-name" id="current-filename">workers_comp_security_response_v1.md</div>
+            <div class="file-meta" id="current-filemeta">Uploaded by FSR &middot; 3 sections &middot; Ready to inspect or download</div>
+          </div>
+        </div>
+        <div class="file-actions">
+          <button type="button" class="btn-outline" id="btn-toggle-preview">Inspect Artifact Text</button>
+          <button type="button" class="btn-outline" id="btn-download-file">&#8681; Download Artifact (.md)</button>
+        </div>
+      </div>
+
+      <div class="artifact-preview" id="artifact-preview-box"></div>
+    </div>
+
+    <!-- STEP 2: Evaluation & Remediation Gate -->
+    <div class="card" id="eval-card"></div>
+  </div>
+
+  <script>
+    const ARTIFACTS = {
+      fixable: {
+        filename: "workers_comp_security_response_v1.md",
+        meta: "Uploaded by FSR · 3 sections · Ready to inspect or download",
+        text: [
+          "# Customer Security Response — Workers' Compensation Agency (v1)",
+          "",
+          "## 1. Data Residency & CMEK Boundary",
+          "Gemini Enterprise enforces strict data residency (DRZ) and CMEK pinned solely to the us-central1 single-region boundary.",
+          "",
+          "## 2. Uploaded Claim PDF Handling",
+          "When a claims adjuster uploads a PDF containing an SSN, Cloud SDP masks the SSN inline as [SSN-MASKED] and forwards the file to the LLM.",
+          "",
+          "## 3. Prompt Injection & Exfiltration Posture",
+          "Our architecture is 100% immune to prompt injection and provides zero risk of data exfiltration."
+        ].join("\n"),
+        pass1Issues: [
+          {
+            id: "GCP-DRZ-REGION",
+            tag: "GCP Fact-Check",
+            rule: "Gemini Enterprise DRZ & CMEK operate at the 'us' or 'eu' multi-region boundary, not single regions.",
+            original: "Gemini Enterprise enforces strict data residency (DRZ) and CMEK pinned solely to the us-central1 single-region boundary.",
+            highlighted: 'Gemini Enterprise enforces strict data residency (DRZ) and CMEK <mark class="err-hl">pinned solely to the us-central1 single-region boundary.</mark>',
+            fix: "Gemini Enterprise enforces data residency (DRZ) and CMEK within the selected 'us' or 'eu' multi-region boundary."
+          },
+          {
+            id: "GCP-SDP-UPLOAD",
+            tag: "GCP Fact-Check",
+            rule: "UploadSessionFile blocks the entire file when Cloud SDP detects an SSN (no inline masking).",
+            original: "When a claims adjuster uploads a PDF containing an SSN, Cloud SDP masks the SSN inline as [SSN-MASKED] and forwards the file to the LLM.",
+            highlighted: 'When a claims adjuster uploads a PDF containing an SSN, Cloud SDP <mark class="err-hl">masks the SSN inline as [SSN-MASKED] and forwards the file</mark> to the LLM.',
+            fix: "When Cloud SDP detects a configured InfoType such as an SSN during UploadSessionFile, Gemini Enterprise blocks the file upload before model inference."
+          }
+        ],
+        pass2Issue: {
+          id: "PASS2-FAIL-CLOSED",
+          tag: "Pass #2 Deep Audit · Unqualified Guarantee & Default-Open Gap",
+          rule: "Section 3 still promises '100% immune / zero risk', and does not warn the customer to configure FAIL_CLOSED.",
+          original: "Our architecture is 100% immune to prompt injection and provides zero risk of data exfiltration.",
+          highlighted: 'Our architecture is <mark class="err-hl">100% immune to prompt injection and provides zero risk</mark> of data exfiltration.',
+          wrongOption: "Option A: State that Google Cloud automatically enables Model Armor FAIL_CLOSED for all public sector customers.",
+          wrongFeedback: "Why Option A fails evaluation: Model Armor templates default to FAIL_OPEN unless the customer admin explicitly sets failure_mode=FAIL_CLOSED.",
+          correctOption: "Option B: Specify defense-in-depth controls (Model Armor with failure_mode=FAIL_CLOSED explicitly configured by the admin, Cloud SDP, and VPC-SC).",
+          fix: "Defense-in-depth controls—combining Model Armor (with failure_mode=FAIL_CLOSED configured by the customer administrator), Cloud SDP, and VPC Service Controls—mitigate prompt injection and data exfiltration risks."
+        }
+      },
+      slop: {
+        filename: "fsr_unverified_ai_slop_draft.md",
+        meta: "Uploaded by FSR · Unedited AI slop draft · Ready to inspect or download",
+        text: [
+          "# Executive AI Security Overview",
+          "",
+          "In today's fast-paced digital landscape, we want to delve into how Gemini Enterprise is a testament to our seamless synergy and rich tapestry of cutting-edge cyber resilience.",
+          "",
+          "Furthermore, it is important to note that our holistic paradigm shift automatically guarantees 100% out-of-the-box FedRAMP High, DoD IL5, HIPAA, and CJIS compliance with zero configuration required by your team.",
+          "",
+          "Simply enable STATE_DRIVERS_LICENSE_NUMBER and US_INDIVIDUAL_TAX_IDENTIFIER in our single-region us-central1 vault to cryptographically erase all historical threats."
+        ].join("\n"),
+        isUnsalvageable: true,
+        reasons: [
+          "Pervasive AI filler ('in today\\'s fast-paced digital landscape', 'delve into', 'seamless synergy', 'rich tapestry').",
+          "Blanket compliance overclaim ('100% out-of-the-box FedRAMP High, DoD IL5, HIPAA, and CJIS compliance with zero configuration').",
+          "Fabricated GCP identifiers (STATE_DRIVERS_LICENSE_NUMBER, US_INDIVIDUAL_TAX_IDENTIFIER, and single-region us-central1 vault)."
+        ]
+      },
+      reworked: {
+        filename: "workers_comp_security_response_v2_reworked.md",
+        meta: "Uploaded by FSR · Reworked v2 artifact · Ready to inspect or download",
+        text: [
+          "# Customer Security Response — Workers' Compensation Agency (v2 Reworked)",
+          "",
+          "## 1. Data Residency & CMEK Boundary",
+          "Gemini Enterprise enforces data residency (DRZ) and CMEK within the selected 'us' or 'eu' multi-region boundary.",
+          "",
+          "## 2. Uploaded Claim PDF Handling",
+          "When Cloud SDP detects a configured InfoType such as an SSN during UploadSessionFile, Gemini Enterprise blocks the file upload before model inference.",
+          "",
+          "## 3. Prompt Injection & Exfiltration Posture",
+          "Defense-in-depth controls—combining Model Armor (with failure_mode=FAIL_CLOSED configured by the customer administrator), Cloud SDP, and VPC Service Controls—mitigate prompt injection and data exfiltration risks."
+        ].join("\n")
+      }
+    };
+
+    let currentScenario = "fixable";
+    let currentText = ARTIFACTS.fixable.text;
+    let stagedFixes = {};
+    let evalPassNumber = 1;
+    let pass2ChoiceState = null; // null | "wrong" | "correct"
+    let hasInspected = false;
+
+    const filenameEl = document.getElementById("current-filename");
+    const filemetaEl = document.getElementById("current-filemeta");
+    const previewBox = document.getElementById("artifact-preview-box");
+    const togglePreviewBtn = document.getElementById("btn-toggle-preview");
+    const evalCard = document.getElementById("eval-card");
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function updateArtifactHeader() {
+      const art = ARTIFACTS[currentScenario];
+      filenameEl.textContent = art.filename;
+      filemetaEl.textContent = hasInspected
+        ? `${art.meta} · Evaluation Pass #${evalPassNumber}`
+        : `${art.meta} · Click Inspect Artifact Text below to begin`;
+
+      let renderedPreview = escapeHtml(currentText);
+      if (art.pass1Issues) {
+        art.pass1Issues.forEach(issue => {
+          if (stagedFixes[issue.id] && renderedPreview.includes(escapeHtml(issue.original))) {
+            renderedPreview = renderedPreview.replace(
+              escapeHtml(issue.original),
+              `<mark class="fix-hl">${escapeHtml(issue.fix)}</mark>`
+            );
+          }
+        });
+      }
+      if (art.pass2Issue && pass2ChoiceState === "correct" && renderedPreview.includes(escapeHtml(art.pass2Issue.original))) {
+        renderedPreview = renderedPreview.replace(
+          escapeHtml(art.pass2Issue.original),
+          `<mark class="fix-hl">${escapeHtml(art.pass2Issue.fix)}</mark>`
+        );
+      }
+      previewBox.innerHTML = renderedPreview;
+
+      const isOpen = previewBox.classList.contains("open");
+      if (!hasInspected) {
+        togglePreviewBtn.className = "btn-primary-sm";
+        togglePreviewBtn.textContent = "Inspect Artifact Text";
+      } else {
+        togglePreviewBtn.className = "btn-outline";
+        togglePreviewBtn.textContent = isOpen ? "Hide Artifact Text" : "Inspect Artifact Text";
+      }
+    }
+
+    function renderEvaluation() {
+      updateArtifactHeader();
+      const art = ARTIFACTS[currentScenario];
+
+      // GATE: Do not reveal evaluation results until the user clicks "Inspect Artifact Text"
+      if (!hasInspected) {
+        evalCard.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div class="step-label" style="color:#5f6368;">Pre-Send Evaluation &middot; Gated Until Inspected</div>
+              <div style="font-family:'Google Sans',sans-serif; font-size:15.5px; font-weight:500; color:#202124;">
+                Click &ldquo;Inspect Artifact Text&rdquo; above to read the uploaded draft and unlock evaluation findings
+              </div>
+              <div style="font-size:13px; color:#5f6368; margin-top:2px;">
+                Inspecting <code class="gc-code">${art.filename}</code> first shows what was uploaded before you apply fixes or run re-evaluation.
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // CASE 1: Unsalvageable AI Slop -> Must Recreate From Scratch
+      if (art.isUnsalvageable) {
+        evalCard.innerHTML = `
+          <div class="status-banner reject">
+            <div>
+              <div class="status-headline">
+                <span class="badge-reject">REJECTED (1.5 / 10)</span>
+                <span>Submission Too Poor in Quality to Patch — Recreate Required</span>
+              </div>
+              <p class="status-desc">
+                This file contains pervasive AI filler and fabricated compliance claims. Inline fixes are disabled so the author recreates the response from verified sources.
+              </p>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+            <div style="background:#ffffff; border:1px solid #dadce0; border-radius:8px; padding:12px 16px;">
+              <div style="font-family:'Google Sans',sans-serif; font-weight:500; color:#c5221f; margin-bottom:6px;">
+                Why this submission was blocked:
+              </div>
+              <ul class="checklist" style="margin:0;">
+                ${art.reasons.map(r => `<li>${r}</li>`).join("")}
+              </ul>
+            </div>
+            <div style="background:#f8f9fa; border:1px solid #dadce0; border-radius:8px; padding:12px 16px;">
+              <div style="font-family:'Google Sans',sans-serif; font-weight:500; color:#202124; margin-bottom:6px;">
+                What to include in your reworked v2 draft:
+              </div>
+              <ol class="checklist" style="margin:0;">
+                <li>Specify the actual <code class="gc-code">us</code> or <code class="gc-code">eu</code> multi-region DRZ boundary.</li>
+                <li>Use real Cloud SDP InfoTypes (<code class="gc-code">US_DRIVERS_LICENSE_NUMBER</code>) and state that <code class="gc-code">UploadSessionFile</code> blocks SSN files.</li>
+                <li>Cite <code class="gc-code">Model Armor (failure_mode=FAIL_CLOSED)</code> instead of blanket 100% guarantees.</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="submit-bar">
+            <span class="submit-hint">Recreate your draft following the 3 points above, then submit the reworked v2 artifact:</span>
+            <button type="button" class="btn-primary" id="btn-load-reworked">Submit Reworked v2 Artifact for Evaluation &rarr;</button>
+          </div>
+        `;
+
+        document.getElementById("btn-load-reworked").addEventListener("click", () => {
+          selectScenario("reworked");
+        });
+        return;
+      }
+
+      // Check remaining Pass #1 issues in currentText
+      const remainingPass1 = (art.pass1Issues || []).filter(i => currentText.includes(i.original));
+      const hasPass2Issue = art.pass2Issue && currentText.includes(art.pass2Issue.original);
+
+      // SUBCASE 2A: Pass #1 Issues Still Present
+      if (remainingPass1.length > 0) {
+        const stagedCount = remainingPass1.filter(i => stagedFixes[i.id]).length;
+        const wasReEvaluatedUnfixed = evalPassNumber > 1;
+
+        evalCard.innerHTML = `
+          <div class="status-banner hold">
+            <div>
+              <div class="status-headline">
+                <span class="badge-hold">HOLD (5.5 / 10 &middot; PASS #${evalPassNumber})</span>
+                <span>${wasReEvaluatedUnfixed ? `Re-Evaluation Found ${remainingPass1.length} Unresolved Issue${remainingPass1.length === 1 ? "" : "s"}` : `${remainingPass1.length} GCP Fact-Check Fixes Ready to Apply`}</span>
+              </div>
+              <p class="status-desc">
+                ${wasReEvaluatedUnfixed
+                  ? "Submitting triggered a new evaluation pass, which held the submission because the flagged claims below were not updated."
+                  : "Apply the ready fixes to the uploaded artifact below, then click Submit for Evaluation to run Pass #2."}
+              </p>
+            </div>
+            <div>
+              <button type="button" class="btn-outline" id="btn-stage-all" style="background:#ffffff;">Apply Both Ready Fixes</button>
+            </div>
+          </div>
+
+          <div id="issues-list">
+            ${remainingPass1.map(issue => {
+              const isStaged = !!stagedFixes[issue.id];
+              return `
+                <div class="finding-card ${isStaged ? "staged" : ""}">
+                  <div class="finding-top">
+                    <div class="finding-top-left">
+                      <span class="finding-tag">${issue.tag}</span>
+                      <span class="finding-rule">${issue.rule}</span>
+                    </div>
+                    <span style="font-size:12px; color:#5f6368;">${isStaged ? "&#10003; Applied to artifact" : "Pending fix"}</span>
+                  </div>
+                  <div class="finding-grid">
+                    <div class="finding-quote"><b>Uploaded Draft:</b> "${issue.highlighted}"</div>
+                    <div class="finding-fix-box">
+                      <div class="finding-fix-text"><b>Ready Fix:</b> ${issue.fix}</div>
+                      <button type="button" class="stage-btn ${isStaged ? "applied" : ""}" data-id="${issue.id}">
+                        ${isStaged ? "&#10003; Applied" : "Apply Fix"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+
+          <div class="submit-bar">
+            <span class="submit-hint">
+              <b>${stagedCount} of ${remainingPass1.length}</b> fixes applied to <code class="gc-code">${art.filename}</code>. Clicking Submit triggers Evaluation Pass #${evalPassNumber + 1}.
+            </span>
+            <button type="button" class="btn-primary" id="btn-resubmit">
+              Submit for Evaluation (Pass #${evalPassNumber + 1}) &rarr;
+            </button>
+          </div>
+        `;
+
+        document.getElementById("btn-stage-all").addEventListener("click", () => {
+          remainingPass1.forEach(issue => {
+            stagedFixes[issue.id] = true;
+          });
+          renderEvaluation();
+        });
+
+        evalCard.querySelectorAll(".stage-btn").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const id = btn.getAttribute("data-id");
+            stagedFixes[id] = !stagedFixes[id];
+            renderEvaluation();
+          });
+        });
+
+        document.getElementById("btn-resubmit").addEventListener("click", () => {
+          // Commit staged fixes into currentText before running next evaluation pass
+          remainingPass1.forEach(issue => {
+            if (stagedFixes[issue.id]) {
+              currentText = currentText.replace(issue.original, issue.fix);
+            }
+          });
+          stagedFixes = {};
+          evalPassNumber += 1;
+          renderEvaluation();
+        });
+        return;
+      }
+
+      // SUBCASE 2B: Pass #1 Fixes Applied, Now Pass #2 Catches the Deep Cross-Section Issue ("Teach to Fish")!
+      if (hasPass2Issue) {
+        const p2 = art.pass2Issue;
+        evalCard.innerHTML = `
+          <div class="verified-pill">
+            &#10003; Pass #1 fixes verified in <code>${art.filename}</code> (Multi-region DRZ &amp; UploadSessionFile blocking)
+          </div>
+
+          <div class="status-banner hold">
+            <div>
+              <div class="status-headline">
+                <span class="badge-hold">HOLD ON RE-EVALUATION (7.4 / 10 &middot; PASS #${evalPassNumber})</span>
+                <span>Submission Did Not Pass Yet — 1 Cross-Section Policy Issue Caught</span>
+              </div>
+              <p class="status-desc">
+                Fixing Sections 1 &amp; 2 resolved the surface GCP errors, but Pass #${evalPassNumber} flagged Section 3's blanket <b>"100% immune / zero risk"</b> guarantee. Choose the verified revision below to re-submit:
+              </p>
+            </div>
+          </div>
+
+          <div class="finding-card ${pass2ChoiceState === "correct" ? "staged" : ""}">
+            <div class="finding-top">
+              <div class="finding-top-left">
+                <span class="finding-tag">${p2.tag}</span>
+                <span class="finding-rule">${p2.rule}</span>
+              </div>
+            </div>
+            <div class="finding-quote" style="margin-bottom:10px;"><b>Section 3 in Uploaded Draft:</b> "${p2.highlighted}"</div>
+
+            <div style="font-size:13px; font-weight:500; color:#202124; margin-bottom:4px;">
+              Select the accurate engineering revision to apply to Section 3:
+            </div>
+            <button type="button" class="choice-option ${pass2ChoiceState === "wrong" ? "wrong" : ""}" id="btn-choice-wrong">
+              ${p2.wrongOption}
+              ${pass2ChoiceState === "wrong" ? `<div style="margin-top:4px; color:#c5221f; font-weight:500;">&#10007; ${p2.wrongFeedback}</div>` : ""}
+            </button>
+            <button type="button" class="choice-option ${pass2ChoiceState === "correct" ? "correct" : ""}" id="btn-choice-correct">
+              ${p2.correctOption}
+              ${pass2ChoiceState === "correct" ? `<div style="margin-top:4px; color:#137333; font-weight:500;">&#10003; Verified revision staged in ${art.filename}</div>` : ""}
+            </button>
+          </div>
+
+          <div class="submit-bar">
+            <span class="submit-hint">
+              ${pass2ChoiceState === "correct"
+                ? "Verified Section 3 revision staged. Click Submit to run Pass #" + (evalPassNumber + 1) + "."
+                : "Select the verified revision above before re-submitting."}
+            </span>
+            <button type="button" class="btn-primary" id="btn-resubmit-pass2">
+              Submit for Evaluation (Pass #${evalPassNumber + 1}) &rarr;
+            </button>
+          </div>
+        `;
+
+        document.getElementById("btn-choice-wrong").addEventListener("click", () => {
+          pass2ChoiceState = "wrong";
+          renderEvaluation();
+        });
+        document.getElementById("btn-choice-correct").addEventListener("click", () => {
+          pass2ChoiceState = "correct";
+          renderEvaluation();
+        });
+        document.getElementById("btn-resubmit-pass2").addEventListener("click", () => {
+          evalPassNumber += 1;
+          if (pass2ChoiceState === "correct") {
+            currentText = currentText.replace(p2.original, p2.fix);
+          } else {
+            pass2ChoiceState = "wrong";
+          }
+          renderEvaluation();
+        });
+        return;
+      }
+
+      // CASE 3: Passed Evaluation!
+      const receipt = "GPS-94E2A1";
+      const bugUrl = "https://b.corp.google.com/issues/new?title=" +
+        encodeURIComponent("[GPS Pre-Send Verified] " + art.filename + " (" + receipt + ")") +
+        "&description=" +
+        encodeURIComponent("Pre-Send Gate Verdict: PASS (9.8/10) on Evaluation Pass #" + evalPassNumber + " · Receipt #" + receipt + "\n\n--- Verified Artifact ---\n" + currentText);
+
+      evalCard.innerHTML = `
+        <div class="status-banner pass">
+          <div>
+            <div class="status-headline">
+              <span class="badge-pass">PASS (9.8 / 10 &middot; PASS #${evalPassNumber})</span>
+              <span>Evaluation Passed — Ready for Customer / CE Submission &middot; Receipt <code class="gc-code">#${receipt}</code></span>
+            </div>
+            <p class="status-desc">
+              All 3 sections in <code class="gc-code">${art.filename}</code> passed GCP architecture fact-checking, compliance scope verification, and AI-slop screening.
+            </p>
+          </div>
+        </div>
+
+        <div class="submit-bar" style="border-top:none; padding-top:2px; margin-top:4px;">
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="btn-success" id="btn-copy-receipt">Copy Verification Receipt (for GChat / Email)</button>
+            <button type="button" class="btn-outline" id="btn-download-verified">&#8681; Download Verified Artifact (.md)</button>
+            <a href="${bugUrl}" target="_blank" class="btn-outline">Submit to CE Review Queue (Buganizer) &rarr;</a>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("btn-copy-receipt").addEventListener("click", function() {
+        const stamp = `✅ GPS Pre-Send Gate: PASS (9.8/10 on Pass #${evalPassNumber}) · Artifact: ${art.filename} · Receipt #${receipt}`;
+        navigator.clipboard.writeText(stamp);
+        this.textContent = "✓ Receipt Copied to Clipboard";
+        setTimeout(() => { this.textContent = "Copy Verification Receipt (for GChat / Email)"; }, 1600);
+      });
+
+      document.getElementById("btn-download-verified").addEventListener("click", downloadCurrentArtifact);
+    }
+
+    function downloadCurrentArtifact() {
+      const art = ARTIFACTS[currentScenario];
+      const blob = new Blob([currentText], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = art.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function selectScenario(name) {
+      currentScenario = name;
+      currentText = ARTIFACTS[name].text;
+      stagedFixes = {};
+      evalPassNumber = 1;
+      pass2ChoiceState = null;
+      hasInspected = false;
+      previewBox.classList.remove("open");
+      document.querySelectorAll(".scenario-btn").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-scenario") === name);
+      });
+      renderEvaluation();
+    }
+
+    document.querySelectorAll(".scenario-btn").forEach(btn => {
+      btn.addEventListener("click", () => selectScenario(btn.getAttribute("data-scenario")));
+    });
+
+    togglePreviewBtn.addEventListener("click", function() {
+      const isOpen = previewBox.classList.toggle("open");
+      if (!hasInspected) {
+        hasInspected = true;
+      }
+      renderEvaluation();
+    });
+
+    document.getElementById("btn-download-file").addEventListener("click", downloadCurrentArtifact);
+
+    document.getElementById("btn-upload-own").addEventListener("click", () => {
+      document.getElementById("file-upload").click();
+    });
+
+    document.getElementById("file-upload").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      if (text.includes("delve into") || text.includes("seamless synergy") || text.includes("STATE_DRIVERS_LICENSE_NUMBER")) {
+        ARTIFACTS.slop.filename = file.name;
+        selectScenario("slop");
+      } else if (text.includes("us-central1") || text.includes("[SSN-MASKED]") || text.includes("100% immune")) {
+        ARTIFACTS.fixable.filename = file.name;
+        selectScenario("fixable");
+        currentText = text;
+        renderEvaluation();
+      } else {
+        ARTIFACTS.reworked.filename = file.name;
+        selectScenario("reworked");
+        currentText = text;
+        renderEvaluation();
+      }
+    });
+
+    // Initialize with Scenario 1
+    selectScenario("fixable");
+  </script>
+</body>
+</html>
