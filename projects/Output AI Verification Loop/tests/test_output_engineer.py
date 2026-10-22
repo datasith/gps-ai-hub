@@ -18,6 +18,7 @@ import check_ste100  # noqa: E402
 import council_runner  # noqa: E402
 import eval_council  # noqa: E402
 import render_canvas  # noqa: E402
+import scan_document  # noqa: E402
 
 
 class TestCheckSTE100(unittest.TestCase):
@@ -159,6 +160,58 @@ class TestKarpathyCouncilAndEvalFramework(unittest.TestCase):
         eval_res["stage1_single_model_baselines"]["seat-gemini-pro"]["recall_pct"],
         50.0,
     )
+
+
+class TestSelfServeDocumentScanner(unittest.TestCase):
+  """Tests for scripts/scan_document.py."""
+
+  def test_detects_ai_slop_gcp_contradictions_and_risky_guarantees(self) -> None:
+    samples_dir = PROJECT_ROOT / "examples" / "presend_gate_samples"
+    v1_path = samples_dir / "workers_comp_security_response_v1.md"
+    slop_path = samples_dir / "fsr_unverified_ai_slop_draft.md"
+    v2_path = samples_dir / "workers_comp_security_response_v2_reworked.md"
+
+    # 1. Fixable v1 draft -> HOLD
+    res_v1 = scan_document.scan_text(
+        scan_document.extract_text_from_file(v1_path), source_label=v1_path.name
+    )
+    self.assertEqual(res_v1["verdict"], "HOLD")
+    self.assertEqual(res_v1["counts"]["gcp_fact_check"], 2)
+    self.assertEqual(res_v1["counts"]["risky_guarantee"], 1)
+
+    # 2. Unsalvageable AI slop draft -> REJECT_RECREATE
+    res_slop = scan_document.scan_text(
+        scan_document.extract_text_from_file(slop_path), source_label=slop_path.name
+    )
+    self.assertEqual(res_slop["verdict"], "REJECT_RECREATE")
+    self.assertGreaterEqual(res_slop["counts"]["ai_slop"], 1)
+    self.assertGreaterEqual(res_slop["counts"]["gcp_fact_check"], 1)
+
+    # 3. Reworked v2 artifact -> PASS
+    res_v2 = scan_document.scan_text(
+        scan_document.extract_text_from_file(v2_path), source_label=v2_path.name
+    )
+    self.assertEqual(res_v2["verdict"], "PASS")
+    self.assertEqual(res_v2["counts"]["total"], 0)
+
+  def test_extracts_docx_paragraphs_without_external_deps(self) -> None:
+    import zipfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+      docx_path = Path(tmpdir) / "sample.docx"
+      doc_xml = (
+          '<?xml version="1.0" encoding="UTF-8"?>'
+          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+          "<w:body>"
+          "<w:p><w:r><w:t>Gemini Enterprise enforces data residency within the us multi-region.</w:t></w:r></w:p>"
+          "</w:body></w:document>"
+      )
+      with zipfile.ZipFile(docx_path, "w") as zf:
+        zf.writestr("word/document.xml", doc_xml)
+
+      extracted = scan_document.extract_text_from_file(docx_path)
+      self.assertIn("us multi-region", extracted)
+      res = scan_document.scan_text(extracted, source_label="sample.docx")
+      self.assertEqual(res["verdict"], "PASS")
 
 
 if __name__ == "__main__":
