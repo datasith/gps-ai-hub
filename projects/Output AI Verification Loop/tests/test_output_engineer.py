@@ -18,6 +18,7 @@ import check_ste100  # noqa: E402
 import council_runner  # noqa: E402
 import eval_council  # noqa: E402
 import render_canvas  # noqa: E402
+import scan_document  # noqa: E402
 
 
 class TestCheckSTE100(unittest.TestCase):
@@ -159,6 +160,98 @@ class TestKarpathyCouncilAndEvalFramework(unittest.TestCase):
         eval_res["stage1_single_model_baselines"]["seat-gemini-pro"]["recall_pct"],
         50.0,
     )
+
+
+class TestSelfServeDocumentScanner(unittest.TestCase):
+  """Tests for scripts/scan_document.py."""
+
+  def test_detects_ai_slop_gcp_contradictions_and_risky_guarantees(self) -> None:
+    samples_dir = PROJECT_ROOT / "examples" / "presend_gate_samples"
+    v1_path = samples_dir / "workers_comp_security_response_v1.md"
+    slop_path = samples_dir / "fsr_unverified_ai_slop_draft.md"
+    v2_path = samples_dir / "workers_comp_security_response_v2_reworked.md"
+
+    # 1. Fixable v1 draft -> HOLD (Agentic Fix unlocked + Council tuning signals emitted)
+    res_v1 = scan_document.scan_text(
+        scan_document.extract_text_from_file(v1_path), source_label=v1_path.name
+    )
+    self.assertEqual(res_v1["verdict"], "HOLD")
+    self.assertTrue(res_v1["agentic_fix_eligible"])
+    self.assertFalse(res_v1["ce_review_digest"]["ready_for_ce_review"])
+    self.assertEqual(len(res_v1["ce_review_digest"]["council_tuning_signals"]), 3)
+    self.assertEqual(res_v1["counts"]["gcp_fact_check"], 2)
+    self.assertEqual(res_v1["counts"]["risky_guarantee"], 1)
+
+    # 2. Unsalvageable AI slop draft -> REJECT_RECREATE (Agentic Fix locked)
+    res_slop = scan_document.scan_text(
+        scan_document.extract_text_from_file(slop_path), source_label=slop_path.name
+    )
+    self.assertEqual(res_slop["verdict"], "REJECT_RECREATE")
+    self.assertFalse(res_slop["agentic_fix_eligible"])
+    self.assertFalse(res_slop["ce_review_digest"]["ready_for_ce_review"])
+    self.assertGreaterEqual(res_slop["counts"]["ai_slop"], 1)
+    self.assertGreaterEqual(res_slop["counts"]["gcp_fact_check"], 1)
+
+    # 3. Reworked v2 artifact -> PASS (Approved with CE Review Digest)
+    res_v2 = scan_document.scan_text(
+        scan_document.extract_text_from_file(v2_path), source_label=v2_path.name
+    )
+    self.assertEqual(res_v2["verdict"], "PASS")
+    self.assertFalse(res_v2["agentic_fix_eligible"])
+    self.assertTrue(res_v2["ce_review_digest"]["ready_for_ce_review"])
+    self.assertEqual(len(res_v2["ce_review_digest"]["human_ce_focus_areas"]), 2)
+    self.assertEqual(res_v2["counts"]["total"], 0)
+
+  def test_extracts_docx_paragraphs_without_external_deps(self) -> None:
+    import zipfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+      docx_path = Path(tmpdir) / "sample.docx"
+      doc_xml = (
+          '<?xml version="1.0" encoding="UTF-8"?>'
+          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+          "<w:body>"
+          "<w:p><w:r><w:t>Gemini Enterprise enforces data residency within the us multi-region.</w:t></w:r></w:p>"
+          "</w:body></w:document>"
+      )
+      with zipfile.ZipFile(docx_path, "w") as zf:
+        zf.writestr("word/document.xml", doc_xml)
+
+      extracted = scan_document.extract_text_from_file(docx_path)
+      self.assertIn("us multi-region", extracted)
+      res = scan_document.scan_text(extracted, source_label="sample.docx")
+      self.assertEqual(res["verdict"], "PASS")
+      self.assertTrue(res["step2_routing_unlocked"])
+
+  def test_validates_and_cross_checks_step2_routing_metadata(self) -> None:
+    # 1. Locked when Gate 1 has not passed
+    locked = scan_document.validate_routing_metadata(
+        "006Kf000009WpQ1IAK", "ER-528352", "datasith", gate1_verdict="HOLD"
+    )
+    self.assertFalse(locked["valid"])
+    self.assertFalse(locked["step2_unlocked"])
+
+    # 2. Valid matching Opportunity ID, ER ID, and Hawn team CE
+    ok = scan_document.validate_routing_metadata(
+        "006Kf000009WpQ1IAK", "ER-528352", "datasith", gate1_verdict="PASS"
+    )
+    self.assertTrue(ok["valid"])
+    self.assertTrue(ok["is_hawn_team"])
+    self.assertEqual(ok["warnings"], [])
+
+    # 3. Cross-check mismatch between ER-528352 and wrong Opportunity ID
+    mismatch = scan_document.validate_routing_metadata(
+        "006Kf000001Stf9IAA", "ER-528352", "datasith", gate1_verdict="PASS"
+    )
+    self.assertFalse(mismatch["valid"])
+    self.assertIn("Cross-Check Mismatch", mismatch["errors"][0])
+
+    # 4. Routing to another Hawn team member emits a CC warning note
+    cc_note = scan_document.validate_routing_metadata(
+        "006Kf000009WpQ1IAK", "ER-528352", "peterfisher", gate1_verdict="PASS"
+    )
+    self.assertTrue(cc_note["valid"])
+    self.assertTrue(cc_note["is_hawn_team"])
+    self.assertEqual(len(cc_note["warnings"]), 1)
 
 
 if __name__ == "__main__":
