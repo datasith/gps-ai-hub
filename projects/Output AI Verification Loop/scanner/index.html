@@ -1,0 +1,1968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS Document Reviewer (go/gps-reviewer) — Google Public Sector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      color: #3c4043;
+      font-family: 'Google Sans Text', 'Google Sans', Roboto, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a {
+      color: #1a73e8;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+
+    /* ---------- Hero Band (.gc-band modeled directly on go/sbid-discovery) ---------- */
+    .gc-band {
+      background: #f8f9fa;
+      border-bottom: 1px solid #e8eaed;
+      padding: 36px 40px;
+    }
+    .gc-band-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 48px;
+      align-items: center;
+    }
+    @media (max-width: 860px) {
+      .gc-band-inner {
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+    }
+    .gc-logo-card {
+      width: 128px;
+      height: 128px;
+      background: #ffffff;
+      border-radius: 8px;
+      border: 1px solid #dadce0;
+      box-shadow: 0 1px 2px rgba(60, 64, 67, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .gc-logo-card img {
+      width: 80px;
+      height: 80px;
+      display: block;
+    }
+    .gc-tagline {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 22px;
+      font-weight: 400;
+      line-height: 1.35;
+      color: #202124;
+      margin: 0 0 8px 0;
+      max-width: 760px;
+    }
+    .gc-band-sub {
+      font-size: 15px;
+      line-height: 1.6;
+      color: #5f6368;
+      margin: 0 0 18px 0;
+      max-width: 760px;
+    }
+    .gc-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    /* ---------- Buttons (go/sbid-discovery style) ---------- */
+    .gc-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #1a73e8;
+      color: #ffffff;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.25px;
+      padding: 9px 22px;
+      border-radius: 4px;
+      border: 1px solid #1a73e8;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+    .gc-btn:hover {
+      background: #1765cc;
+      border-color: #1765cc;
+      text-decoration: none;
+    }
+    .gc-btn-success {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #1e8e3e;
+      color: #ffffff;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.25px;
+      padding: 9px 22px;
+      border-radius: 4px;
+      border: 1px solid #1e8e3e;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+    .gc-btn-success:hover {
+      background: #137333;
+      border-color: #137333;
+    }
+    .gc-btn-outline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #ffffff;
+      color: #1a73e8;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.25px;
+      padding: 9px 20px;
+      border-radius: 4px;
+      border: 1px solid #dadce0;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+    .gc-btn-outline:hover {
+      background: #f8fafd;
+      border-color: #d2e3fc;
+      text-decoration: none;
+    }
+    .gc-btn-sm {
+      padding: 6px 14px;
+      font-size: 13px;
+    }
+
+    /* ---------- Two-Column Body (.gc-body from go/sbid-discovery) ---------- */
+    .gc-body {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 36px 40px 72px 40px;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 48px;
+    }
+    @media (max-width: 860px) {
+      .gc-body {
+        grid-template-columns: 1fr;
+        gap: 32px;
+        padding: 24px;
+      }
+    }
+
+    /* Left Sidebar */
+    .gc-side-label {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: #5f6368;
+      margin: 0 0 12px 0;
+    }
+    .gc-side-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: #202124;
+      text-decoration: none;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    .gc-side-link:hover {
+      color: #1a73e8;
+      text-decoration: none;
+    }
+    .gc-side-link:last-of-type {
+      border-bottom: none;
+    }
+    .gc-ico {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background-color: #e8f0fe;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 20px 20px;
+      flex-shrink: 0;
+    }
+    .gc-ico-spark { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzFhNzNlOCI+PHBhdGggZD0ibTE5IDkgMS4yNS0yLjc1TDIzIDVsLTIuNzUtMS4yNUwxOSAxbC0xLjI1IDIuNzVMMTUgNWwyLjc1IDEuMjVMMTkgOXptLTcuNS41TDkgNCA2LjUgOS41IDEgMTJsNS41IDIuNUw5IDIwbDIuNS01LjVMMTcgMTJsLTUuNS0yLjV6TTE5IDE1bC0xLjI1IDIuNzVMMTUgMTlsMi43NSAxLjI1TDE5IDIzbDEuMjUtMi43NUwyMyAxOWwtMi43NS0xLjI1TDE5IDE1eiIvPjwvc3ZnPg=="); }
+    .gc-ico-laptop { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzFhNzNlOCI+PHBhdGggZD0iTTIwIDE4YzEuMSAwIDEuOTktLjkgMS45OS0yTDIyIDZjMC0xLjEtLjktMi0yLTJINGMtMS4xIDAtMiAuOS0yIDJ2MTBjMCAxLjEuOSAyIDIgMkgwdjJoMjR2LTJoLTR6TTQgNmgxNnYxMEg0VjZ6Ii8+PC9zdmc+"); }
+    .gc-ico-bug { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzFhNzNlOCI+PHBhdGggZD0iTTIwIDhoLTIuODFjLS40NS0uNzgtMS4wNy0xLjQ1LTEuODItMS45NkwxNyA0LjQxIDE1LjU5IDNsLTIuMTcgMi4xN0MxMi45NiA1LjA2IDEyLjQ5IDUgMTIgNWMtLjQ5IDAtLjk2LjA2LTEuNDEuMTdMOC40MSAzIDcgNC40MWwxLjYyIDEuNjNDNy44OCA2LjU1IDcuMjYgNy4yMiA2LjgxIDhINHYyaDIuMDljLS4wNS4zMy0uMDkuNjYtLjA5IDF2MUg0djJoMnYxYzAgLjM0LjA0LjY3LjA5IDFINHYyaDIuODFjMS4wNCAxLjc5IDIuOTcgMyA1LjE5IDNzNC4xNS0xLjIxIDUuMTktM0gyMHYtMmgtMi4wOWMuMDUtLjMzLjA5LS42Ni4wOS0xdi0xaDJ2LTJoLTJ2LTFjMC0uMzQtLjA0LS42Ny0uMDktMUgyMFY4em0tNiA4aC00di0yaDR2MnptMC00aC00di0yaDR2MnoiLz48L3N2Zz4="); }
+    .gc-ico-bulb { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzFhNzNlOCI+PHBhdGggZD0iTTkgMjFjMCAuNTUuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTF2LTFIOXYxem0zLTE5QzguMTQgMiA1IDUuMTQgNSA5YzAgMi4zOCAxLjE5IDQuNDcgMyA1Ljc0VjE3YzAgLjU1LjQ1IDEgMSAxaDZjLjU1IDAgMS0uNDUgMS0xdi0yLjI2YzEuODEtMS4yNyAzLTMuMzYgMy01Ljc0IDAtMy44Ni0zLjE0LTctNy03em0yLjg1IDExLjFsLS44NS42VjE2aC00di0yLjNsLS44NS0uNkM3LjggMTIuMTYgNyAxMC42MyA3IDljMC0yLjc2IDIuMjQtNSA1LTVzNSAyLjI0IDUgNWMwIDEuNjMtLjggMy4xNi0yLjE1IDQuMXoiLz48L3N2Zz4="); }
+
+    .gc-glossary {
+      margin-top: 28px;
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+    .gc-glossary dt {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: #202124;
+      margin: 0;
+    }
+    .gc-glossary dd {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #5f6368;
+      margin: 2px 0 12px 0;
+    }
+    .gc-glossary dd:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Main Column */
+    .gc-stripe {
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(to right, #4285f4 0 25%, #ea4335 25% 50%, #fbbc04 50% 75%, #34a853 75% 100%);
+      margin: 0 0 24px 0;
+    }
+    .gc-keypoint {
+      background: #e6f4ea;
+      border-left: 4px solid #1e8e3e;
+      border-radius: 0 8px 8px 0;
+      padding: 12px 18px;
+      margin: 0 0 24px 0;
+      font-size: 14.5px;
+      line-height: 1.55;
+      color: #202124;
+    }
+    .gc-keypoint b {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-weight: 500;
+      color: #137333;
+    }
+
+    /* Numbered Steps (.gc-steps & .gc-num from go/sbid-discovery) */
+    .gc-step-block {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .gc-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #1a73e8;
+      color: #ffffff;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .gc-num.done {
+      background: #1e8e3e;
+    }
+    .gc-step-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .gc-step-title {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 20px;
+      font-weight: 400;
+      color: #202124;
+      margin: 0 0 4px 0;
+    }
+    .gc-step-text {
+      font-size: 14.5px;
+      color: #5f6368;
+      margin: 0 0 14px 0;
+    }
+
+    /* Drag & Drop File Box (Buttons Always Under Text so Height Never Jumps) */
+    .drop-file-card {
+      background: #f8f9fa;
+      border: 1px dashed #8ab4f8;
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin-bottom: 10px;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .drop-file-card.dragover {
+      background: #e8f0fe;
+      border-color: #1a73e8;
+    }
+    .file-box {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+    }
+    .file-icon {
+      width: 36px;
+      height: 36px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: #e8f0fe;
+      color: #1a73e8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .file-text-wrap {
+      min-width: 0;
+      flex: 1;
+    }
+    .file-name {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: #202124;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-meta {
+      font-size: 12.5px;
+      color: #5f6368;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-left: 48px;
+      flex-wrap: wrap;
+    }
+
+    .sample-loader-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 12.5px;
+      color: #5f6368;
+      margin-bottom: 14px;
+    }
+    .sample-link-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #1a73e8;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .sample-link-btn:hover {
+      text-decoration: underline;
+    }
+
+    .paste-box-wrap {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e8eaed;
+    }
+    .paste-box-wrap.open {
+      display: block;
+    }
+    .paste-textarea {
+      width: 100%;
+      min-height: 150px;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #202124;
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      padding: 10px 12px;
+      resize: vertical;
+      margin-bottom: 8px;
+    }
+    .paste-textarea:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8 inset;
+    }
+
+    .artifact-preview {
+      display: none;
+      margin-top: 12px;
+      background: #f1f3f4;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #202124;
+      white-space: pre-wrap;
+      max-height: 360px;
+      overflow-y: auto;
+    }
+    .artifact-preview.open {
+      display: block;
+    }
+
+    /* Evaluation Banners & Tables */
+    .status-banner {
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      margin: 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .status-banner.hold {
+      background: #fef7e0;
+      border-left: 4px solid #f9ab00;
+    }
+    .status-banner.reject {
+      background: #fce8e6;
+      border-left: 4px solid #d93025;
+    }
+    .status-banner.pass {
+      background: #e6f4ea;
+      border-left: 4px solid #1e8e3e;
+    }
+    .status-headline {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 15.5px;
+      font-weight: 500;
+      color: #202124;
+      margin: 0 0 2px 0;
+    }
+    .status-desc {
+      font-size: 13.5px;
+      color: #3c4043;
+      margin: 0;
+    }
+
+    /* go/sbid-discovery Table Style (.gc-table) */
+    .gc-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 8px 0 14px 0;
+    }
+    .gc-table th {
+      text-align: left;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 12.5px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      color: #5f6368;
+      background: #ffffff;
+      border-bottom: 1px solid #dadce0;
+      padding: 10px 12px;
+    }
+    .gc-table td {
+      color: #3c4043;
+      border-bottom: 1px solid #e8eaed;
+      padding: 12px;
+      vertical-align: top;
+    }
+    .gc-code {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 11.5px;
+      color: #5f6368;
+      background: #f1f3f4;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    /* Choice Options */
+    .choice-option {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #f8f9fa;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 8px;
+      font-family: 'Google Sans Text', Roboto, sans-serif;
+      font-size: 13.5px;
+      color: #202124;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .choice-option:hover {
+      background: #f1f3f4;
+    }
+    .choice-option.wrong {
+      border-color: #d93025;
+      background: #fce8e6;
+    }
+    .choice-option.correct {
+      border-color: #1e8e3e;
+      background: #e6f4ea;
+    }
+
+    /* ---------- STEP 2: Route to Customer Engineer (Appears ONLY After Verification) ---------- */
+    .routing-card {
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 20px 22px;
+      margin-top: 8px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 720px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .field-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .field-label {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+    }
+    .field-input {
+      width: 100%;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 13.5px;
+      color: #202124;
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      padding: 9px 12px;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .field-input:focus {
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8 inset;
+    }
+    .field-input.invalid {
+      border-color: #d93025;
+      background: #fffbfa;
+    }
+    .field-input.valid {
+      border-color: #1e8e3e;
+    }
+    .field-status {
+      font-size: 12px;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+    .field-status.ok { color: #137333; }
+    .field-status.err { color: #c5221f; }
+    .field-status.warn { color: #b06000; }
+
+    /* Hawn's Team Selectable Defaults + Search */
+    .ce-picker-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .ce-search-input {
+      font-family: 'Google Sans Text', Roboto, sans-serif;
+      font-size: 13px;
+      padding: 6px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      width: 280px;
+      max-width: 100%;
+    }
+    .ce-chips-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    @media (max-width: 680px) {
+      .ce-chips-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .ce-chip {
+      text-align: left;
+      background: #f8f9fa;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .ce-chip:hover {
+      background: #f1f3f4;
+    }
+    .ce-chip.selected {
+      background: #e8f0fe;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8 inset;
+    }
+    .ce-chip-name {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+    }
+    .ce-chip.selected .ce-chip-name {
+      color: #174ea6;
+    }
+    .ce-chip-meta {
+      font-size: 11.5px;
+      color: #5f6368;
+    }
+    .ce-team-badge {
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      color: #1967d2;
+      background: #ffffff;
+      border: 1px solid #d2e3fc;
+      padding: 1px 7px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* ---------- Bottom Collapsible (<details class="gc-details"> from go/sbid-discovery) ---------- */
+    .gc-details {
+      margin: 36px 0 0 0;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .gc-details summary {
+      padding: 14px 18px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 15px;
+      font-weight: 500;
+      color: #202124;
+      cursor: pointer;
+      user-select: none;
+    }
+    .gc-details-body {
+      padding: 12px 18px 18px 18px;
+      border-top: 1px solid #f1f3f4;
+      font-size: 13.5px;
+    }
+    .cal-pill {
+      background: #ffffff;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-family: 'Google Sans', Roboto, sans-serif;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: #3c4043;
+      cursor: pointer;
+      margin-right: 4px;
+    }
+    .cal-pill.active-good {
+      background: #e6f4ea;
+      border-color: #1e8e3e;
+      color: #137333;
+      font-weight: 700;
+    }
+    .cal-pill.active-tune {
+      background: #fef7e0;
+      border-color: #f9ab00;
+      color: #b06000;
+      font-weight: 700;
+    }
+    .cal-pill.active-relax {
+      background: #fce8e6;
+      border-color: #d93025;
+      color: #c5221f;
+      font-weight: 700;
+    }
+
+    mark.err-hl {
+      background: #fce8e6;
+      color: #c5221f;
+      font-weight: 500;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    mark.fix-hl {
+      background: #e6f4ea;
+      color: #137333;
+      font-weight: 500;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero Band (.gc-band modeled directly on go/sbid-discovery) -->
+  <section class="gc-band">
+    <div class="gc-band-inner">
+      <div class="gc-logo-card">
+        <img src="https://www.gstatic.com/images/branding/productlogos/google_cloud/v8/192px.svg" alt="Google Cloud">
+      </div>
+      <div class="gc-band-text">
+        <div class="gc-tagline">Check your customer draft and route it to a Customer Engineer.</div>
+        <div class="gc-band-sub">
+          Supports security questionnaires, RFP responses, and architecture drafts (<code>.docx</code>, <code>.md</code>, <code>.txt</code>, or pasted text). Use it to verify Google Cloud product and compliance claims before sending your document to a Customer Engineer.
+        </div>
+        <div class="gc-actions">
+          <input type="file" id="file-upload" accept=".docx,.md,.txt,.html" style="display:none;">
+          <button type="button" class="gc-btn" id="btn-upload-own">Upload Document (.docx / .md / .txt)</button>
+          <button type="button" class="gc-btn-outline" id="btn-toggle-paste">Paste Draft Text</button>
+          <button type="button" class="gc-btn-outline" id="btn-hero-download" style="display:none;">Download Verified Draft (.md)</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Two-Column Body (.gc-body modeled directly on go/sbid-discovery) -->
+  <div class="gc-body">
+
+    <!-- Left Sidebar -->
+    <aside class="gc-side">
+      <div class="gc-side-label">Helpful links</div>
+      <a href="http://go/vector" target="_blank" class="gc-side-link">
+        <span class="gc-ico gc-ico-spark"></span>
+        <span>Open Vector CRM</span>
+      </a>
+      <a href="http://go/output-engineer" target="_blank" class="gc-side-link">
+        <span class="gc-ico gc-ico-laptop"></span>
+        <span>Output Engineer Repo</span>
+      </a>
+      <a href="https://b.corp.google.com/issues/new?title=%5Bgo%2Fgps-reviewer+Bug%5D+" target="_blank" class="gc-side-link">
+        <span class="gc-ico gc-ico-bug"></span>
+        <span>Report a bug</span>
+      </a>
+      <a href="https://b.corp.google.com/issues/new?title=%5Bgo%2Fgps-reviewer+Feature%5D+" target="_blank" class="gc-side-link">
+        <span class="gc-ico gc-ico-bulb"></span>
+        <span>Request a feature</span>
+      </a>
+
+      <div class="gc-glossary">
+        <div class="gc-side-label">How it works</div>
+        <dl>
+          <dt>1. Upload</dt>
+          <dd>Drop a <code>.docx</code>, <code>.md</code>, or <code>.txt</code> customer draft—or paste text directly.</dd>
+          <dt>2. Review &amp; Refine</dt>
+          <dd>Fix any flagged Google Cloud product or compliance claims in one click.</dd>
+          <dt>3. Route to CE</dt>
+          <dd>Link your Vector Opportunity and ER to send the verified draft to a Customer Engineer.</dd>
+        </dl>
+      </div>
+    </aside>
+
+    <!-- Main Content Column -->
+    <main class="gc-main">
+      <div class="gc-stripe"></div>
+
+      <div class="gc-keypoint">
+        <b>Key point:</b> Customer Engineer routing unlocks automatically once all flagged claims in your draft are resolved.
+      </div>
+
+      <!-- STEP 1: Upload & Review Document -->
+      <div class="gc-step-block">
+        <span class="gc-num" id="step1-num">1</span>
+        <div class="gc-step-body">
+          <h2 class="gc-step-title">Upload and review your draft</h2>
+          <p class="gc-step-text">
+            Drop a <code>.docx</code>, <code>.md</code>, or <code>.txt</code> file below (or paste text) to check for Google Cloud product and compliance accuracy.
+          </p>
+
+          <!-- Drag & Drop + File Row (Buttons Always Under Text so Height Never Jumps) -->
+          <div class="drop-file-card" id="dropzone">
+            <div class="file-box">
+              <div class="file-info">
+                <div class="file-icon" id="file-icon-badge">DOC</div>
+                <div class="file-text-wrap">
+                  <div class="file-name" id="current-filename">No document loaded yet — drop a .docx, .md, or .txt file here</div>
+                  <div class="file-meta" id="current-filemeta">Supports Word (.docx), Markdown (.md), Plain Text (.txt), or pasted text</div>
+                </div>
+              </div>
+              <div class="file-actions">
+                <button type="button" class="gc-btn gc-btn-sm" id="btn-browse-inline">Choose File (.docx / .md / .txt)</button>
+                <button type="button" class="gc-btn-outline gc-btn-sm" id="btn-toggle-preview" style="display:none;">Inspect Artifact Text</button>
+                <button type="button" class="gc-btn-outline gc-btn-sm" id="btn-download-file" style="display:none;">Download Artifact (.md)</button>
+              </div>
+            </div>
+
+            <!-- Inline Paste Editor -->
+            <div class="paste-box-wrap" id="paste-box-wrap">
+              <label class="field-label" for="paste-textarea" style="display:block; margin-bottom:6px;">Paste customer draft text or RFP section:</label>
+              <textarea id="paste-textarea" class="paste-textarea" placeholder="Paste your security questionnaire response, architecture section, or RFP draft here..."></textarea>
+              <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button type="button" class="gc-btn-outline gc-btn-sm" id="btn-cancel-paste">Cancel</button>
+                <button type="button" class="gc-btn gc-btn-sm" id="btn-load-pasted">Check Pasted Draft</button>
+              </div>
+            </div>
+
+            <div class="artifact-preview" id="artifact-preview-box"></div>
+          </div>
+
+          <!-- Subtle Sample Loader for Initial Testing -->
+          <div class="sample-loader-bar">
+            <span>Try a sample file:</span>
+            <button type="button" class="sample-link-btn" data-sample="fixable">Sample 1: Draft with Fixable Claims</button>
+            <span>&middot;</span>
+            <button type="button" class="sample-link-btn" data-sample="slop">Sample 2: Incomplete / Placeholder Draft</button>
+            <span>&middot;</span>
+            <button type="button" class="sample-link-btn" data-sample="reworked">Sample 3: Verified Clean Draft</button>
+          </div>
+
+          <!-- Dynamic Review Results -->
+          <div id="gate1-eval-box"></div>
+        </div>
+      </div>
+
+      <!-- STEP 2: Route to Customer Engineer (Hidden Until Document Is Verified!) -->
+      <div class="gc-step-block" id="step2-block" style="display:none;">
+        <span class="gc-num" id="step2-num">2</span>
+        <div class="gc-step-body">
+          <h2 class="gc-step-title">Route to a Customer Engineer</h2>
+          <p class="gc-step-text">
+            Enter your Vector Opportunity ID, Expert Request (ER) ID, and select a Customer Engineer from Hawn Nguyen's Cloud AI team (or search the directory).
+          </p>
+
+          <div class="routing-card">
+            <div class="form-grid">
+              <div>
+                <div class="field-label-row">
+                  <label class="field-label" for="input-opp-id">Vector Opportunity ID *</label>
+                  <button type="button" class="sample-link-btn" id="btn-fill-sample-er" style="font-size:11.5px;">Fill sample Vector IDs (ER-528352)</button>
+                </div>
+                <input type="text" id="input-opp-id" class="field-input" value="" placeholder="e.g., 006Kf000009WpQ1IAK">
+                <div class="field-status" id="status-opp-id">Enter your 18-character Vector Opportunity ID starting with 006.</div>
+              </div>
+              <div>
+                <div class="field-label-row">
+                  <label class="field-label" for="input-er-id">Vector Expert Request (ER) ID *</label>
+                </div>
+                <input type="text" id="input-er-id" class="field-input" value="" placeholder="e.g., ER-528352">
+                <div class="field-status" id="status-er-id">Enter your 6-digit Vector Expert Request ID (ER-XXXXXX).</div>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <div class="ce-picker-header">
+                <label class="field-label" style="margin:0;">Assign Customer Engineer (Hawn Nguyen's Cloud AI Team Defaults) *</label>
+                <input type="text" id="input-ce-search" class="ce-search-input" placeholder="Search CE by name or @google.com LDAP...">
+              </div>
+              <div class="ce-chips-grid" id="ce-chips-container"></div>
+              <div class="field-status" id="status-ce-select"></div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding-top:12px; border-top:1px solid #e8eaed;">
+              <span style="font-size:13px; color:#5f6368;" id="step2-summary-hint">
+                Opportunity ID, ER ID, and CE selection are cross-checked before generating your routing package.
+              </span>
+              <button type="button" class="gc-btn-success" id="btn-submit-to-ce">
+                Send to Customer Engineer &rarr;
+              </button>
+            </div>
+
+            <div id="step2-confirmation-box" style="margin-top:14px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Collapsible Drawer for CEs (Modeled on "For CEs: Cloudtop command line" in go/sbid-discovery) -->
+      <details class="gc-details" id="ce-digest-drawer">
+        <summary>For CEs: Review Digest &amp; Council Calibration</summary>
+        <div class="gc-details-body" id="ce-digest-body"></div>
+      </details>
+
+    </main>
+  </div>
+
+  <script>
+    const HAWN_TEAM = [
+      { ldap: "datasith", name: "Cisco Zabala", title: "Practice CE, Cloud AI", team: "Hawn's Team" },
+      { ldap: "peterfisher", name: "Peter Fisher", title: "Practice CE, Cloud AI", team: "Hawn's Team" },
+      { ldap: "noelsingh", name: "Noel Singh", title: "Practice CE, Cloud AI", team: "Hawn's Team" },
+      { ldap: "gcpashish", name: "Ashish Malik", title: "Practice CE, Cloud AI", team: "Hawn's Team" },
+      { ldap: "itsdeon", name: "Deon James", title: "Practice CE, Cloud AI", team: "Hawn's Team" },
+      { ldap: "oktony", name: "Anthony Okwechime", title: "Practice CE, Cloud AI", team: "Hawn's Team" },
+      { ldap: "stepakoffn", name: "Nicolette Stepakoff", title: "Customer Engineer, Cloud AI, GPS", team: "Hawn's Team" },
+      { ldap: "hawnsolo", name: "Hawn Nguyen", title: "Head of Cloud AI, RISE (Team Triage)", team: "Manager" }
+    ];
+
+    const EXTRA_DIRECTORY_CES = [
+      { ldap: "pubalisen", name: "Pubali Sen", title: "Principal Architect, Google Public Sector", team: "GPS Directory" },
+      { ldap: "brentmitchell", name: "Brent Mitchell", title: "Director, Customer Engineering, GPS", team: "GPS Directory" }
+    ];
+
+    const VECTOR_ERS = {
+      "ER-528352": {
+        oppId: "006Kf000009WpQ1IAK",
+        account: "Arkansas / State Workers' Compensation Agency Pilot",
+        ownerLdap: "datasith",
+        ownerName: "Cisco Zabala",
+        status: "Assigned"
+      },
+      "ER-527595": {
+        oppId: "006Kf000001Stf9IAA",
+        account: "Stanford University — Gemini Enterprise & PTA Agent",
+        ownerLdap: "datasith",
+        ownerName: "Cisco Zabala",
+        status: "Completed"
+      },
+      "ER-529104": {
+        oppId: "006Kf000008Mnp2IAC",
+        account: "Federal Civilian Claims Modernization",
+        ownerLdap: "peterfisher",
+        ownerName: "Peter Fisher",
+        status: "Assigned"
+      }
+    };
+
+    const VECTOR_OPPS = {
+      "006Kf000009WpQ1IAK": "Arkansas / State Workers' Compensation Agency Pilot ($420K ACV)",
+      "006Kf000001Stf9IAA": "Stanford University — Gemini Enterprise & PTA Agent ($650K ACV)",
+      "006Kf000008Mnp2IAC": "Federal Civilian Claims Modernization ($1.1M ACV)"
+    };
+
+    const LIVE_RULES = [
+      {
+        id: "GCP-DRZ-REGION",
+        passTier: 1,
+        section: "Data Residency & CMEK Boundary",
+        category: "GCP Fact-Check",
+        severity: "HIGH",
+        regex: /([^\n.]*\b(?:us-central1|us-east4|us-west1|single[- ]region)\b[^\n.]*\b(?:data residency|DRZ|CMEK|Gemini Enterprise)\b[^\n.]*\.?|[^\n.]*\b(?:data residency|DRZ|CMEK|Gemini Enterprise)\b[^\n.]*\b(?:us-central1|us-east4|us-west1)\b[^\n.]*\.?)/gi,
+        rule: "Gemini Enterprise data residency (DRZ) and CMEK operate at the 'us' or 'eu' multi-region boundary, not single regions like us-central1.",
+        fix: "Gemini Enterprise enforces data residency (DRZ) and CMEK within the selected 'us' or 'eu' multi-region boundary.",
+        seatScores: "Gemini Pro: 4.0 | Claude Opus: 3.5 | OpenAI (Flash fallback): 4.0",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "GCP-SDP-UPLOAD",
+        passTier: 1,
+        section: "Cloud SDP & Uploaded File Handling",
+        category: "GCP Fact-Check",
+        severity: "HIGH",
+        regex: /([^\n.]*(?:\[SSN-MASKED\]|masks?\s+SSNs?\s+inline|masks?\s+the\s+SSN\s+inline)[^\n.]*\.?)/gi,
+        rule: "UploadSessionFile rejects the entire uploaded file when Cloud SDP detects a blocked InfoType such as an SSN (no inline masking).",
+        fix: "When Cloud SDP detects a configured InfoType such as an SSN during UploadSessionFile, Gemini Enterprise blocks the file upload before model inference.",
+        seatScores: "Gemini Pro: 4.5 | Claude Opus: 4.0 | OpenAI (Flash fallback): 4.5",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "GCP-SDP-INFOTYPE",
+        passTier: 1,
+        section: "Cloud SDP InfoType Identifiers",
+        category: "GCP Fact-Check",
+        severity: "HIGH",
+        regex: /([^\n.]*\b(?:STATE_DRIVERS_LICENSE_NUMBER|US_INDIVIDUAL_TAX_IDENTIFIER)\b[^\n.]*\.?)/gi,
+        rule: "Neither identifier exists in Google Cloud Sensitive Data Protection (SDP); use US_DRIVERS_LICENSE_NUMBER and US_INDIVIDUAL_TAXPAYER_IDENTIFICATION_NUMBER.",
+        fix: "Configure the built-in Cloud SDP detectors US_DRIVERS_LICENSE_NUMBER and US_INDIVIDUAL_TAXPAYER_IDENTIFICATION_NUMBER.",
+        seatScores: "Gemini Pro: 3.5 | Claude Opus: 3.5 | OpenAI (Flash fallback): 4.0",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "GCP-KMS-ROTATION",
+        passTier: 1,
+        section: "Cloud KMS Key Rotation vs. Destruction",
+        category: "GCP Fact-Check",
+        severity: "HIGH",
+        regex: /([^\n.]*\bkey rotation\b[^\n.]*\b(?:revokes|destroys|cryptographically erases|renders unreadable|deletes old)\b[^\n.]*\.?)/gi,
+        rule: "Cloud KMS key rotation creates a new primary version for encryption but keeps older versions ENABLED for decryption. Only key version destruction is permanent.",
+        fix: "Cloud KMS key rotation generates a new primary key version for new writes, while Destroying a key version permanently blocks decryption of historical data.",
+        seatScores: "Gemini Pro: 4.0 | Claude Opus: 4.0 | OpenAI (Flash fallback): 4.5",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "GCP-VPCSC-IMAGE",
+        passTier: 1,
+        section: "VPC Service Controls vs. Browser Rendering",
+        category: "GCP Fact-Check",
+        severity: "HIGH",
+        regex: /([^\n.]*\b(?:VPC-SC|VPC Service Controls)\b[^\n.]*\b(?:browser|markdown image|<img>|image exfiltration)\b[^\n.]*\.?)/gi,
+        rule: "VPC Service Controls protect backend Google Cloud API perimeters; the Gemini Enterprise web client blocks external Markdown image tags client-side.",
+        fix: "The Gemini Enterprise web client (ucs_widget) blocks external Markdown image tags client-side by default (render_images_in_ui_directly=false).",
+        seatScores: "Gemini Pro: 4.5 | Claude Opus: 4.0 | OpenAI (Flash fallback): 4.5",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "GCP-QUOTA-300RPM",
+        passTier: 1,
+        section: "Gemini Enterprise StreamAssist Quota",
+        category: "GCP Fact-Check",
+        severity: "MEDIUM",
+        regex: /([^\n.]*\b300\s*(?:API\s*)?(?:requests\s*per\s*minute|RPM)\b[^\n.]*\b(?:Assistant|StreamAssist)\b[^\n.]*\.?)/gi,
+        rule: "300 RPM is the Search quota. StreamAssist (Assistant) quota is 600 RPM per project per region (1,800 RPM per organization per region).",
+        fix: "Gemini Enterprise Assistant enforces a default quota of 600 requests per minute per project per region (and 1,800 RPM per organization per region).",
+        seatScores: "Gemini Pro: 5.0 | Claude Opus: 4.5 | OpenAI (Flash fallback): 5.0",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "SLOP-AI-FILLER",
+        passTier: 1,
+        section: "Generic Filler Prose",
+        category: "AI Slop & Readability",
+        severity: "MEDIUM",
+        regex: /([^\n.]*\b(?:delve\s+into|testament\s+to|rich\s+tapestry|in\s+today's\s+fast-paced|it\s+is\s+important\s+to\s+note\s+that|seamless\s+synergy|holistic\s+paradigm\s+shift)\b[^\n.]*\.?)/gi,
+        rule: "Replace generic filler phrases with concrete Google Cloud architecture and control descriptions.",
+        fix: "Below is the verified Google Cloud security architecture and control mapping for your deployment.",
+        seatScores: "Gemini Pro: 3.0 | Claude Opus: 2.5 | OpenAI (Flash fallback): 3.0",
+        spread: "0.5 pt (Initial Scan)",
+        stage2Outcome: "Unanimous baseline catch",
+        defaultCal: "good"
+      },
+      {
+        id: "PASS2-FAIL-CLOSED",
+        passTier: 2,
+        section: "Security Posture & Model Armor Configuration",
+        category: "Risky Guarantee",
+        severity: "HIGH",
+        isGuidedChoice: true,
+        regex: /([^\n.]*\b(?:100%\s+(?:immune|guaranteed|secure|hack-proof|out-of-the-box)|zero\s+risk\s+of|completely\s+impossible\s+to\s+exfiltrate|unconditionally\s+guarantees|automatically\s+guarantees\s+100%)\b[^\n.]*\.?)/gi,
+        rule: "Avoid unqualified '100% immune / zero risk' guarantees and specify Model Armor failure_mode=FAIL_CLOSED configured by the customer administrator.",
+        wrongOption: "Option A: State that Google Cloud automatically enables Model Armor FAIL_CLOSED for all public sector customers.",
+        wrongFeedback: "Model Armor templates default to FAIL_OPEN unless the customer administrator explicitly configures failure_mode=FAIL_CLOSED.",
+        correctOption: "Option B (Recommended): Specify defense-in-depth controls (Model Armor with failure_mode=FAIL_CLOSED configured by the customer admin, Cloud SDP, and VPC Service Controls).",
+        fix: "Defense-in-depth controls—combining Model Armor (with failure_mode=FAIL_CLOSED configured by the customer administrator), Cloud SDP, and VPC Service Controls—mitigate prompt injection and data exfiltration risks.",
+        seatScores: "Gemini Pro: 9.0 (Pass) | Claude Opus: 4.5 (Fail) | OpenAI (Flash fallback): 6.0",
+        spread: "4.5 pts (Council Catch)",
+        stage2Outcome: "Stage 2 Blind Peer Review overrode Gemini Pro's 9.0 false pass",
+        defaultCal: "tune"
+      }
+    ];
+
+    const SAMPLE_DOCUMENTS = {
+      fixable: {
+        filename: "workers_comp_security_response_v1.md",
+        text: [
+          "# Customer Security Response — Workers' Compensation Agency (v1)",
+          "",
+          "## 1. Data Residency & CMEK Boundary",
+          "Gemini Enterprise enforces strict data residency (DRZ) and CMEK pinned solely to the us-central1 single-region boundary.",
+          "",
+          "## 2. Uploaded Claim PDF Handling",
+          "When a claims adjuster uploads a PDF containing an SSN, Cloud SDP masks the SSN inline as [SSN-MASKED] and forwards the file to the LLM.",
+          "",
+          "## 3. Prompt Injection & Exfiltration Posture",
+          "Our architecture is 100% immune to prompt injection and provides zero risk of data exfiltration."
+        ].join("\n")
+      },
+      slop: {
+        filename: "fsr_unverified_ai_slop_draft.md",
+        text: [
+          "# Executive AI Security Overview",
+          "",
+          "In today's fast-paced digital landscape, we want to delve into how Gemini Enterprise is a testament to our seamless synergy and rich tapestry of cutting-edge cyber resilience.",
+          "",
+          "Furthermore, it is important to note that our holistic paradigm shift automatically guarantees 100% out-of-the-box FedRAMP High, DoD IL5, HIPAA, and CJIS compliance with zero configuration required by your team.",
+          "",
+          "Simply enable STATE_DRIVERS_LICENSE_NUMBER and US_INDIVIDUAL_TAX_IDENTIFIER in our single-region us-central1 vault to cryptographically erase all historical threats."
+        ].join("\n")
+      },
+      reworked: {
+        filename: "workers_comp_security_response_v2_verified.md",
+        text: [
+          "# Customer Security Response — Workers' Compensation Agency (v2 Verified)",
+          "",
+          "## 1. Data Residency & CMEK Boundary",
+          "Gemini Enterprise enforces data residency (DRZ) and CMEK within the selected 'us' or 'eu' multi-region boundary.",
+          "",
+          "## 2. Uploaded Claim PDF Handling",
+          "When Cloud SDP detects a configured InfoType such as an SSN during UploadSessionFile, Gemini Enterprise blocks the file upload before model inference.",
+          "",
+          "## 3. Prompt Injection & Exfiltration Posture",
+          "Defense-in-depth controls—combining Model Armor (with failure_mode=FAIL_CLOSED configured by the customer administrator), Cloud SDP, and VPC Service Controls—mitigate prompt injection and data exfiltration risks."
+        ].join("\n")
+      }
+    };
+
+    let hasDocumentLoaded = false;
+    let currentFilename = "";
+    let currentText = "";
+    let stagedFixes = {};
+    let councilSubmitted = false;
+    let pass1IncompleteWarning = false;
+    let pass2ChoiceState = null;
+    let selectedCeLdap = "datasith";
+    let ceSearchQuery = "";
+    let step2Submitted = false;
+    let resolvedFindingsHistory = [];
+    let calibrationState = {
+      "GCP-DRZ-REGION": "good",
+      "GCP-SDP-UPLOAD": "good",
+      "PASS2-FAIL-CLOSED": "tune"
+    };
+
+    const filenameEl = document.getElementById("current-filename");
+    const filemetaEl = document.getElementById("current-filemeta");
+    const previewBox = document.getElementById("artifact-preview-box");
+    const togglePreviewBtn = document.getElementById("btn-toggle-preview");
+    const downloadFileBtn = document.getElementById("btn-download-file");
+    const heroDownloadBtn = document.getElementById("btn-hero-download");
+    const gate1EvalBox = document.getElementById("gate1-eval-box");
+    const step1Num = document.getElementById("step1-num");
+    const step2Block = document.getElementById("step2-block");
+    const step2Num = document.getElementById("step2-num");
+    const oppInput = document.getElementById("input-opp-id");
+    const erInput = document.getElementById("input-er-id");
+    const ceSearchInput = document.getElementById("input-ce-search");
+    const ceChipsContainer = document.getElementById("ce-chips-container");
+    const step2ConfirmBox = document.getElementById("step2-confirmation-box");
+    const ceDigestBody = document.getElementById("ce-digest-body");
+    const dropzone = document.getElementById("dropzone");
+    const pasteBoxWrap = document.getElementById("paste-box-wrap");
+    const pasteTextarea = document.getElementById("paste-textarea");
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function computeReceiptId(text) {
+      let hash = 2166136261;
+      for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return "GPS-" + (hash >>> 0).toString(16).toUpperCase().padStart(6, "0").slice(0, 6);
+    }
+
+    async function extractTextFromDocxBuffer(arrayBuffer) {
+      const bytes = new Uint8Array(arrayBuffer);
+      const view = new DataView(arrayBuffer);
+      let offset = 0;
+      const decoder = new TextDecoder("utf-8");
+
+      while (offset + 30 <= bytes.length) {
+        const sig = view.getUint32(offset, true);
+        if (sig !== 0x04034b50) break;
+        const compression = view.getUint16(offset + 8, true);
+        const compressedSize = view.getUint32(offset + 18, true);
+        const fileNameLen = view.getUint16(offset + 26, true);
+        const extraLen = view.getUint16(offset + 28, true);
+        const nameBytes = bytes.subarray(offset + 30, offset + 30 + fileNameLen);
+        const entryName = decoder.decode(nameBytes);
+        const dataStart = offset + 30 + fileNameLen + extraLen;
+        const dataEnd = dataStart + compressedSize;
+
+        if (entryName === "word/document.xml") {
+          const compressedData = bytes.subarray(dataStart, dataEnd);
+          let xmlText = "";
+          if (compression === 0) {
+            xmlText = decoder.decode(compressedData);
+          } else if (compression === 8 && typeof DecompressionStream !== "undefined") {
+            const ds = new DecompressionStream("deflate-raw");
+            const writer = ds.writable.getWriter();
+            writer.write(compressedData);
+            writer.close();
+            const outBuffer = await new Response(ds.readable).arrayBuffer();
+            xmlText = decoder.decode(outBuffer);
+          }
+          if (xmlText) {
+            const xmlDoc = new DOMParser().parseFromString(xmlText, "application/xml");
+            const paragraphs = [];
+            const pNodes = xmlDoc.getElementsByTagName("w:p");
+            for (let i = 0; i < pNodes.length; i++) {
+              const tNodes = pNodes[i].getElementsByTagName("w:t");
+              let pText = "";
+              for (let j = 0; j < tNodes.length; j++) {
+                pText += tNodes[j].textContent || "";
+              }
+              if (pText.trim()) paragraphs.push(pText.trim());
+            }
+            if (paragraphs.length > 0) return paragraphs.join("\n\n");
+          }
+        }
+        offset = dataEnd;
+      }
+      return decoder.decode(bytes);
+    }
+
+    function analyzeCurrentText(text) {
+      const normalized = (text || "").trim();
+      const pass1Issues = [];
+      const pass2CouncilIssues = [];
+      const slopIssues = [];
+
+      LIVE_RULES.forEach(rule => {
+        rule.regex.lastIndex = 0;
+        let match;
+        while ((match = rule.regex.exec(normalized)) !== null) {
+          const snippet = match[0].trim();
+          const item = {
+            id: rule.id,
+            passTier: rule.passTier,
+            section: rule.section,
+            category: rule.category,
+            severity: rule.severity,
+            rule: rule.rule,
+            original: snippet,
+            fix: rule.fix,
+            wrongOption: rule.wrongOption,
+            wrongFeedback: rule.wrongFeedback,
+            correctOption: rule.correctOption,
+            seatScores: rule.seatScores,
+            spread: rule.spread,
+            stage2Outcome: rule.stage2Outcome,
+            defaultCal: rule.defaultCal
+          };
+          if (rule.category === "AI Slop & Readability") {
+            if (!slopIssues.some(x => x.original === snippet)) slopIssues.push(item);
+          }
+          if (rule.passTier === 1) {
+            if (!pass1Issues.some(x => x.original === snippet)) pass1Issues.push(item);
+          } else {
+            if (!pass2CouncilIssues.some(x => x.original === snippet)) pass2CouncilIssues.push(item);
+          }
+        }
+      });
+
+      const highCount = pass1Issues.filter(i => i.severity === "HIGH").length + pass2CouncilIssues.length;
+      const medCount = pass1Issues.filter(i => i.severity === "MEDIUM").length;
+      const rawScore = 10.0 - (highCount * 2.0) - (medCount * 1.2);
+      const score = normalized ? Math.max(1.0, Math.min(10.0, Math.round(rawScore * 10) / 10)) : 0.0;
+
+      const isUnsalvageable = (slopIssues.length >= 1 && highCount >= 2) || (normalized.length > 0 && score < 4.0);
+      const isPass1Clean = normalized.length > 0 && !isUnsalvageable && pass1Issues.length === 0;
+      const isFullyApproved = isPass1Clean && (councilSubmitted || pass2CouncilIssues.length === 0) && pass2CouncilIssues.length === 0;
+
+      return {
+        score,
+        isUnsalvageable,
+        isPass1Clean,
+        isFullyApproved,
+        pass1Issues,
+        pass2CouncilIssues,
+        slopIssues,
+        receiptId: computeReceiptId(normalized)
+      };
+    }
+
+    function loadDocument(filename, text) {
+      hasDocumentLoaded = true;
+      currentFilename = filename;
+      currentText = text.trim();
+      stagedFixes = {};
+      councilSubmitted = false;
+      pass1IncompleteWarning = false;
+      pass2ChoiceState = null;
+      step2Submitted = false;
+      resolvedFindingsHistory = [];
+      pasteBoxWrap.classList.remove("open");
+      renderEvaluation();
+    }
+
+    function updateArtifactHeader(analysis) {
+      if (!hasDocumentLoaded) {
+        filenameEl.textContent = "No document loaded yet — drop a .docx, .md, or .txt file here";
+        filemetaEl.textContent = "Supports Word (.docx), Markdown (.md), Plain Text (.txt), or pasted text";
+        togglePreviewBtn.style.display = "none";
+        downloadFileBtn.style.display = "none";
+        heroDownloadBtn.style.display = "none";
+        step1Num.className = "gc-num";
+        return;
+      }
+
+      togglePreviewBtn.style.display = "inline-flex";
+      downloadFileBtn.style.display = "inline-flex";
+      heroDownloadBtn.style.display = analysis.isFullyApproved ? "inline-flex" : "none";
+
+      filenameEl.textContent = currentFilename;
+      step1Num.className = analysis.isFullyApproved ? "gc-num done" : "gc-num";
+
+      const wordCount = currentText.split(/\s+/).filter(Boolean).length;
+      const statusText = analysis.isFullyApproved
+        ? "Verified and ready for CE routing"
+        : (analysis.isUnsalvageable ? "Needs revision before routing" : "Review suggested updates below");
+      filemetaEl.textContent = `${wordCount} words · ${statusText}`;
+
+      let renderedPreview = escapeHtml(currentText);
+      analysis.pass1Issues.forEach(issue => {
+        const escOrig = escapeHtml(issue.original);
+        if (stagedFixes[issue.id] && renderedPreview.includes(escOrig)) {
+          renderedPreview = renderedPreview.replace(escOrig, `<mark class="fix-hl">${escapeHtml(issue.fix)}</mark>`);
+        } else if (renderedPreview.includes(escOrig)) {
+          renderedPreview = renderedPreview.replace(escOrig, `<mark class="err-hl">${escOrig}</mark>`);
+        }
+      });
+      if (councilSubmitted || analysis.isPass1Clean) {
+        analysis.pass2CouncilIssues.forEach(issue => {
+          const escOrig = escapeHtml(issue.original);
+          if (pass2ChoiceState === "correct" && renderedPreview.includes(escOrig)) {
+            renderedPreview = renderedPreview.replace(escOrig, `<mark class="fix-hl">${escapeHtml(issue.fix)}</mark>`);
+          } else if (renderedPreview.includes(escOrig)) {
+            renderedPreview = renderedPreview.replace(escOrig, `<mark class="err-hl">${escOrig}</mark>`);
+          }
+        });
+      }
+      previewBox.innerHTML = renderedPreview;
+
+      const isOpen = previewBox.classList.contains("open");
+      togglePreviewBtn.className = "gc-btn-outline gc-btn-sm";
+      togglePreviewBtn.textContent = isOpen ? "Hide Artifact Text" : "Inspect Artifact Text";
+    }
+
+    function renderCeChips() {
+      const q = ceSearchQuery.trim().toLowerCase();
+      let pool = [...HAWN_TEAM];
+      if (q) {
+        pool = [...HAWN_TEAM, ...EXTRA_DIRECTORY_CES].filter(
+          c => c.name.toLowerCase().includes(q) || c.ldap.toLowerCase().includes(q) || c.title.toLowerCase().includes(q)
+        );
+        const cleanLdap = q.replace(/@google\.com$/, "");
+        if (/^[a-z][a-z0-9._-]{1,24}$/.test(cleanLdap) && !pool.some(c => c.ldap === cleanLdap)) {
+          pool.push({
+            ldap: cleanLdap,
+            name: `${cleanLdap}@google.com`,
+            title: "Custom Google Directory Lookup",
+            team: "Directory Search"
+          });
+        }
+      }
+
+      ceChipsContainer.innerHTML = pool.map(ce => {
+        const isSel = selectedCeLdap === ce.ldap;
+        return `
+          <button type="button" class="ce-chip ${isSel ? "selected" : ""}" data-ldap="${ce.ldap}">
+            <div>
+              <div class="ce-chip-name">${ce.name} <span style="font-weight:400; color:#5f6368;">(${ce.ldap}@)</span></div>
+              <div class="ce-chip-meta">${ce.title}</div>
+            </div>
+            <span class="ce-team-badge">${ce.team}</span>
+          </button>
+        `;
+      }).join("");
+
+      ceChipsContainer.querySelectorAll(".ce-chip").forEach(btn => {
+        btn.addEventListener("click", () => {
+          selectedCeLdap = btn.getAttribute("data-ldap");
+          step2Submitted = false;
+          renderCeChips();
+          validateStep2Fields();
+        });
+      });
+    }
+
+    function validateStep2Fields() {
+      const opp = oppInput.value.trim();
+      const er = erInput.value.trim().toUpperCase();
+      const ce = selectedCeLdap;
+
+      const oppStatus = document.getElementById("status-opp-id");
+      const erStatus = document.getElementById("status-er-id");
+      const ceStatus = document.getElementById("status-ce-select");
+
+      let valid = true;
+
+      const oppFormatOk = /^(?:006[A-Za-z0-9]{12,15}|OPP-\d{4}-\d{3,6})$/.test(opp);
+      if (!opp) {
+        oppInput.className = "field-input";
+        oppStatus.className = "field-status";
+        oppStatus.textContent = "Enter your 18-character Vector Opportunity ID starting with 006.";
+        valid = false;
+      } else if (!oppFormatOk) {
+        oppInput.className = "field-input invalid";
+        oppStatus.className = "field-status err";
+        oppStatus.textContent = "Invalid format: enter an 18-character Vector Opportunity ID starting with 006 (e.g., 006Kf000009WpQ1IAK).";
+        valid = false;
+      } else if (VECTOR_OPPS[opp]) {
+        oppInput.className = "field-input valid";
+        oppStatus.className = "field-status ok";
+        oppStatus.textContent = `Verified in Vector: ${VECTOR_OPPS[opp]}`;
+      } else {
+        oppInput.className = "field-input valid";
+        oppStatus.className = "field-status ok";
+        oppStatus.textContent = `Valid Vector Opportunity ID format (${opp}).`;
+      }
+
+      const erFormatOk = /^ER-\d{6}$/.test(er);
+      if (!er) {
+        erInput.className = "field-input";
+        erStatus.className = "field-status";
+        erStatus.textContent = "Enter your 6-digit Vector Expert Request ID (ER-XXXXXX).";
+        valid = false;
+      } else if (!erFormatOk) {
+        erInput.className = "field-input invalid";
+        erStatus.className = "field-status err";
+        erStatus.textContent = "Invalid format: enter 'ER-' followed by 6 digits (e.g., ER-528352).";
+        valid = false;
+      } else if (VECTOR_ERS[er]) {
+        const erRec = VECTOR_ERS[er];
+        if (oppFormatOk && opp !== erRec.oppId) {
+          erInput.className = "field-input invalid";
+          erStatus.className = "field-status err";
+          erStatus.innerHTML = `Cross-Check Mismatch: <b>${er}</b> belongs to Opportunity <b>${erRec.oppId}</b> (${erRec.account}), not ${escapeHtml(opp)}. <button type="button" id="btn-sync-opp" style="margin-left:6px; font-size:11.5px; color:#1a73e8; background:#ffffff; border:1px solid #1a73e8; border-radius:4px; padding:1px 7px; cursor:pointer;">Sync Opportunity ID</button>`;
+          valid = false;
+        } else {
+          erInput.className = "field-input valid";
+          erStatus.className = "field-status ok";
+          erStatus.textContent = `Cross-Check Passed: ${er} matches Opportunity ${erRec.oppId} (${erRec.status} · Owner: ${erRec.ownerLdap}@).`;
+        }
+      } else {
+        erInput.className = "field-input valid";
+        erStatus.className = "field-status ok";
+        erStatus.textContent = `Valid ER format (${er}).`;
+      }
+
+      const syncBtn = document.getElementById("btn-sync-opp");
+      if (syncBtn && VECTOR_ERS[er]) {
+        syncBtn.addEventListener("click", () => {
+          oppInput.value = VECTOR_ERS[er].oppId;
+          step2Submitted = false;
+          validateStep2Fields();
+        });
+      }
+
+      const allCes = [...HAWN_TEAM, ...EXTRA_DIRECTORY_CES];
+      const chosenObj = allCes.find(c => c.ldap === ce) || { ldap: ce, name: `${ce}@google.com`, team: "Directory" };
+      if (VECTOR_ERS[er] && VECTOR_ERS[er].ownerLdap !== ce) {
+        ceStatus.className = "field-status warn";
+        ceStatus.textContent = `Cross-Check Note: ${er} is assigned to ${VECTOR_ERS[er].ownerName} (${VECTOR_ERS[er].ownerLdap}@) in Vector. Routing to ${chosenObj.name} (${ce}@) will automatically CC ${VECTOR_ERS[er].ownerLdap}@google.com.`;
+      } else {
+        ceStatus.className = "field-status ok";
+        ceStatus.textContent = `Selected CE: ${chosenObj.name} (${ce}@google.com).`;
+      }
+
+      if (!step2Submitted) {
+        step2ConfirmBox.innerHTML = "";
+      }
+      return valid;
+    }
+
+    function renderCeDigestDrawer(analysis) {
+      if (!hasDocumentLoaded || !analysis.isFullyApproved) {
+        ceDigestBody.innerHTML = `
+          <p style="margin:0; color:#5f6368;">
+            The CE Review Digest and Council Calibration table populate once the uploaded draft passes verification.
+          </p>
+        `;
+        return;
+      }
+
+      const opp = oppInput.value.trim() || "Pending Opportunity ID";
+      const er = erInput.value.trim().toUpperCase() || "Pending ER ID";
+      const telemetryRows = resolvedFindingsHistory.length > 0
+        ? resolvedFindingsHistory
+        : [LIVE_RULES[0], LIVE_RULES[1], LIVE_RULES[7]];
+
+      ceDigestBody.innerHTML = `
+        <p style="margin:0 0 12px 0; color:#3c4043;">
+          <b>What the Customer Engineer receives with ${escapeHtml(currentFilename)} (Receipt <span class="gc-code">#${analysis.receiptId}</span> &middot; ${escapeHtml(er)} / ${escapeHtml(opp)}):</b>
+        </p>
+
+        <table class="gc-table">
+          <thead>
+            <tr>
+              <th>Digest Section</th>
+              <th>Summary for Reviewing CE</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>1. Pre-Review Remediation Summary</b></td>
+              <td>
+                Verified prior to CE handoff (${resolvedFindingsHistory.length} claim${resolvedFindingsHistory.length === 1 ? "" : "s"} updated during pre-review). Council seats: <b>Gemini 3.1 Pro</b> + <b>Claude Opus</b> + <b>OpenAI</b> (<i>Gemini 3.1 Flash fallback until OpenAI endpoint is enabled</i>).
+              </td>
+            </tr>
+            <tr>
+              <td><b>2. Human CE Focus Areas</b></td>
+              <td>
+                1. Confirm customer Cloud KMS key ring IAM bindings in the target project.<br>
+                2. Verify VPC Service Controls perimeter bridge for the customer's external data sources.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="font-family:'Google Sans',sans-serif; font-size:14px; font-weight:500; color:#202124; margin:16px 0 6px 0;">
+          3-Stage Council Telemetry &amp; Rubric Fine-Tuning
+        </div>
+        <table class="gc-table">
+          <thead>
+            <tr>
+              <th>Rule / Section</th>
+              <th>Council Seat Scores</th>
+              <th>Stage 2 Blind Peer Review</th>
+              <th>Calibration Signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${telemetryRows.map(row => {
+              const cur = calibrationState[row.id] || row.defaultCal || "good";
+              return `
+                <tr>
+                  <td><b>${row.section}</b><br><span class="gc-code">${row.id}</span></td>
+                  <td>${row.seatScores}<br><span style="font-size:12px; color:#5f6368;">${row.spread}</span></td>
+                  <td>${row.stage2Outcome}</td>
+                  <td>
+                    <button type="button" class="cal-pill ${cur === 'good' ? 'active-good' : ''}" data-rule="${row.id}" data-cal="good">Well-Calibrated</button>
+                    <button type="button" class="cal-pill ${cur === 'tune' ? 'active-tune' : ''}" data-rule="${row.id}" data-cal="tune">Tighten Seat 1 Prompt</button>
+                    <button type="button" class="cal-pill ${cur === 'relax' ? 'active-relax' : ''}" data-rule="${row.id}" data-cal="relax">Too Strict</button>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `;
+
+      ceDigestBody.querySelectorAll(".cal-pill").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const rule = btn.getAttribute("data-rule");
+          const cal = btn.getAttribute("data-cal");
+          calibrationState[rule] = cal;
+          renderCeDigestDrawer(analysis);
+        });
+      });
+    }
+
+    function renderEvaluation() {
+      const analysis = analyzeCurrentText(currentText);
+      updateArtifactHeader(analysis);
+
+      // Step 2 unlocks ONLY after all review findings are resolved
+      step2Block.style.display = analysis.isFullyApproved ? "flex" : "none";
+      if (analysis.isFullyApproved) {
+        renderCeChips();
+        validateStep2Fields();
+      }
+      renderCeDigestDrawer(analysis);
+
+      if (!hasDocumentLoaded) {
+        gate1EvalBox.innerHTML = "";
+        return;
+      }
+
+      // CASE 1: Unsalvageable / Incomplete Draft -> Needs Rebuild
+      if (analysis.isUnsalvageable) {
+        const allIssues = [...analysis.pass1Issues, ...analysis.pass2CouncilIssues];
+        gate1EvalBox.innerHTML = `
+          <div class="status-banner reject">
+            <div>
+              <div class="status-headline">Draft Needs Revision Before Routing</div>
+              <p class="status-desc">
+                This file contains placeholder prose and invalid Google Cloud identifiers. Please update the sections below and upload your revised draft.
+              </p>
+            </div>
+          </div>
+
+          <table class="gc-table">
+            <thead>
+              <tr>
+                <th>Flagged Text in Draft</th>
+                <th>What to Update</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allIssues.map((iss, idx) => `
+                <tr>
+                  <td><b>${idx + 1}. ${iss.section}:</b> "${escapeHtml(iss.original)}"</td>
+                  <td>${iss.rule}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+        return;
+      }
+
+      // CASE 2: Initial Scan Found Product Claims to Fix
+      if (analysis.pass1Issues.length > 0) {
+        const stagedCount = analysis.pass1Issues.filter(i => stagedFixes[i.id]).length;
+        gate1EvalBox.innerHTML = `
+          <div class="status-banner hold">
+            <div>
+              <div class="status-headline">${analysis.pass1Issues.length} Google Cloud Claim${analysis.pass1Issues.length === 1 ? "" : "s"} Need Attention</div>
+              <p class="status-desc">
+                Apply the suggested updates below, then click <b>Submit</b> to complete the review.
+              </p>
+            </div>
+            <div>
+              <button type="button" class="gc-btn-outline gc-btn-sm" id="btn-stage-all">Apply All Fixes</button>
+            </div>
+          </div>
+
+          ${pass1IncompleteWarning ? `
+            <div class="status-banner reject" style="margin:8px 0;">
+              <div>
+                <div class="status-headline">Please Apply All Fixes Before Submitting</div>
+                <p class="status-desc">Click <b>Apply All Fixes</b> (or apply each individual fix) before submitting your draft.</p>
+              </div>
+            </div>
+          ` : ""}
+
+          <table class="gc-table">
+            <thead>
+              <tr>
+                <th>Section &amp; Finding</th>
+                <th>Suggested Update</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${analysis.pass1Issues.map(issue => {
+                const isStaged = !!stagedFixes[issue.id];
+                return `
+                  <tr>
+                    <td>
+                      <b>${issue.section}</b><br>
+                      <span style="font-size:13px; color:#5f6368;">${issue.rule}</span><br>
+                      <div style="margin-top:6px; font-size:12.5px; background:#f8f9fa; padding:6px 8px; border-left:3px solid #d93025;">
+                        "${escapeHtml(issue.original)}"
+                      </div>
+                    </td>
+                    <td>
+                      <div style="font-size:13px; color:#202124;">${escapeHtml(issue.fix)}</div>
+                    </td>
+                    <td style="white-space:nowrap;">
+                      <button type="button" class="${isStaged ? 'gc-btn-success' : 'gc-btn-outline'} gc-btn-sm stage-btn" data-id="${issue.id}">
+                        ${isStaged ? "Applied" : "Apply Fix"}
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-top:12px;">
+            <span style="font-size:13.5px; color:#5f6368;">
+              <b>${stagedCount} of ${analysis.pass1Issues.length}</b> updates applied in <span class="gc-code">${escapeHtml(currentFilename)}</span>.
+            </span>
+            <button type="button" class="gc-btn" id="btn-submit-council">
+              Submit &rarr;
+            </button>
+          </div>
+        `;
+
+        document.getElementById("btn-stage-all").addEventListener("click", () => {
+          analysis.pass1Issues.forEach(issue => { stagedFixes[issue.id] = true; });
+          pass1IncompleteWarning = false;
+          renderEvaluation();
+        });
+        gate1EvalBox.querySelectorAll(".stage-btn").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const id = btn.getAttribute("data-id");
+            stagedFixes[id] = !stagedFixes[id];
+            pass1IncompleteWarning = false;
+            renderEvaluation();
+          });
+        });
+        document.getElementById("btn-submit-council").addEventListener("click", () => {
+          const allReady = analysis.pass1Issues.every(issue => stagedFixes[issue.id]);
+          if (!allReady) {
+            pass1IncompleteWarning = true;
+            renderEvaluation();
+            return;
+          }
+          analysis.pass1Issues.forEach(issue => {
+            currentText = currentText.replace(issue.original, issue.fix);
+            if (!resolvedFindingsHistory.some(r => r.id === issue.id)) {
+              resolvedFindingsHistory.push(issue);
+            }
+          });
+          stagedFixes = {};
+          pass1IncompleteWarning = false;
+          councilSubmitted = true;
+          renderEvaluation();
+        });
+        return;
+      }
+
+      // CASE 3: Deep Review Caught an Unqualified Guarantee
+      if (analysis.pass2CouncilIssues.length > 0) {
+        const p2 = analysis.pass2CouncilIssues[0];
+        gate1EvalBox.innerHTML = `
+          <div class="status-banner hold">
+            <div>
+              <div class="status-headline">1 Security Statement Needs Refinement</div>
+              <p class="status-desc">
+                Avoid promising <b>"100% immune / zero risk"</b>—choose the accurate security statement below to unlock Customer Engineer routing:
+              </p>
+            </div>
+          </div>
+
+          <div style="background:#f8f9fa; border:1px solid #e8eaed; border-radius:8px; padding:14px 16px; margin-bottom:12px;">
+            <div style="font-size:13px; color:#202124; margin-bottom:8px;"><b>${p2.section}:</b> "<mark class="err-hl">${escapeHtml(p2.original)}</mark>"</div>
+            <button type="button" class="choice-option ${pass2ChoiceState === "wrong" ? "wrong" : ""}" id="btn-choice-wrong">
+              ${p2.wrongOption}
+              ${pass2ChoiceState === "wrong" ? `<div style="margin-top:4px; color:#c5221f; font-weight:500;">Not accurate: ${p2.wrongFeedback}</div>` : ""}
+            </button>
+            <button type="button" class="choice-option ${pass2ChoiceState === "correct" ? "correct" : ""}" id="btn-choice-correct">
+              ${p2.correctOption}
+              ${pass2ChoiceState === "correct" ? `<div style="margin-top:4px; color:#137333; font-weight:500;">Update staged in ${escapeHtml(currentFilename)}. Click Submit below to finish.</div>` : ""}
+            </button>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end;">
+            <button type="button" class="gc-btn" id="btn-confirm-pass2">
+              Submit &rarr;
+            </button>
+          </div>
+        `;
+
+        document.getElementById("btn-choice-wrong").addEventListener("click", () => {
+          pass2ChoiceState = "wrong";
+          renderEvaluation();
+        });
+        document.getElementById("btn-choice-correct").addEventListener("click", () => {
+          pass2ChoiceState = "correct";
+          renderEvaluation();
+        });
+        document.getElementById("btn-confirm-pass2").addEventListener("click", () => {
+          if (pass2ChoiceState === "correct") {
+            currentText = currentText.replace(p2.original, p2.fix);
+            if (!resolvedFindingsHistory.some(r => r.id === p2.id)) {
+              resolvedFindingsHistory.push(p2);
+            }
+            councilSubmitted = true;
+          } else {
+            pass2ChoiceState = "wrong";
+          }
+          renderEvaluation();
+        });
+        return;
+      }
+
+      // CASE 4: Document Verified! Step 2 Unlocks Below!
+      gate1EvalBox.innerHTML = `
+        <div class="status-banner pass">
+          <div>
+            <div class="status-headline">Document Verified &middot; Receipt <span class="gc-code">#${analysis.receiptId}</span></div>
+            <p class="status-desc">
+              All Google Cloud product and compliance claims in <span class="gc-code">${escapeHtml(currentFilename)}</span> are verified. Complete <b>Step 2</b> below to send it to your Customer Engineer.
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    function downloadCurrentArtifact() {
+      if (!hasDocumentLoaded) return;
+      const blob = new Blob([currentText], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = currentFilename.replace(/\.docx$/i, ".md");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    document.querySelectorAll(".sample-link-btn[data-sample]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const key = btn.getAttribute("data-sample");
+        const sample = SAMPLE_DOCUMENTS[key];
+        if (sample) {
+          loadDocument(sample.filename, sample.text);
+        }
+      });
+    });
+
+    togglePreviewBtn.addEventListener("click", () => {
+      previewBox.classList.toggle("open");
+      renderEvaluation();
+    });
+
+    downloadFileBtn.addEventListener("click", downloadCurrentArtifact);
+    heroDownloadBtn.addEventListener("click", downloadCurrentArtifact);
+
+    document.getElementById("btn-toggle-paste").addEventListener("click", () => {
+      pasteBoxWrap.classList.toggle("open");
+      if (pasteBoxWrap.classList.contains("open")) {
+        pasteTextarea.focus();
+      }
+    });
+    document.getElementById("btn-cancel-paste").addEventListener("click", () => {
+      pasteBoxWrap.classList.remove("open");
+    });
+    document.getElementById("btn-load-pasted").addEventListener("click", () => {
+      const val = pasteTextarea.value.trim();
+      if (!val) return;
+      loadDocument("pasted_customer_draft.md", val);
+    });
+
+    oppInput.addEventListener("input", () => { step2Submitted = false; validateStep2Fields(); renderCeDigestDrawer(analyzeCurrentText(currentText)); });
+    erInput.addEventListener("input", () => { step2Submitted = false; validateStep2Fields(); renderCeDigestDrawer(analyzeCurrentText(currentText)); });
+    ceSearchInput.addEventListener("input", (e) => {
+      ceSearchQuery = e.target.value;
+      renderCeChips();
+    });
+
+    document.getElementById("btn-fill-sample-er").addEventListener("click", () => {
+      oppInput.value = "006Kf000009WpQ1IAK";
+      erInput.value = "ER-528352";
+      selectedCeLdap = "datasith";
+      step2Submitted = false;
+      renderCeChips();
+      validateStep2Fields();
+      renderCeDigestDrawer(analyzeCurrentText(currentText));
+    });
+
+    document.getElementById("btn-submit-to-ce").addEventListener("click", () => {
+      const ok = validateStep2Fields();
+      if (!ok) {
+        step2ConfirmBox.innerHTML = `
+          <div class="status-banner reject" style="margin:0;">
+            <div>
+              <div class="status-headline">Please Complete Opportunity ID &amp; ER ID Above</div>
+              <p class="status-desc">Ensure both Opportunity ID and ER ID are entered and pass the Vector cross-check before sending to a Customer Engineer.</p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+      step2Submitted = true;
+      step2Num.className = "gc-num done";
+      const allCes = [...HAWN_TEAM, ...EXTRA_DIRECTORY_CES];
+      const chosenObj = allCes.find(c => c.ldap === selectedCeLdap) || { ldap: selectedCeLdap, name: `${selectedCeLdap}@google.com` };
+      const analysis = analyzeCurrentText(currentText);
+      const opp = oppInput.value.trim();
+      const er = erInput.value.trim().toUpperCase();
+
+      const summaryPacket = [
+        `[GPS Pre-Send Verified Package (go/gps-reviewer) · Receipt #${analysis.receiptId}]`,
+        `- Artifact: ${currentFilename}`,
+        `- Vector ER: ${er} | Opportunity: ${opp}`,
+        `- Assigned CE: ${chosenObj.name} (${selectedCeLdap}@google.com)`,
+        `- Pre-Review Updates Applied: ${resolvedFindingsHistory.length}`,
+        `- Human CE Focus: (1) Confirm customer Cloud KMS key ring IAM bindings; (2) Verify VPC-SC perimeter bridge.`
+      ].join("\n");
+
+      step2ConfirmBox.innerHTML = `
+        <div class="status-banner pass" style="margin:0;">
+          <div>
+            <div class="status-headline">Ready for ${chosenObj.name} (${selectedCeLdap}@google.com) &middot; Receipt <span class="gc-code">#${analysis.receiptId}</span></div>
+            <p class="status-desc">
+              Verified draft <span class="gc-code">${escapeHtml(currentFilename)}</span> is linked to <b>${escapeHtml(er)}</b> (Opportunity <b>${escapeHtml(opp)}</b>). Copy the summary for Google Chat / Vector or download the verified markdown below.
+            </p>
+            <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+              <button type="button" class="gc-btn gc-btn-sm" id="btn-copy-summary">Copy Summary for Chat / Vector</button>
+              <button type="button" class="gc-btn-outline gc-btn-sm" id="btn-download-verified-step2">Download Verified Draft (.md)</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("btn-copy-summary").addEventListener("click", async (e) => {
+        try {
+          await navigator.clipboard.writeText(summaryPacket);
+          e.target.textContent = "Copied Summary to Clipboard";
+        } catch (_) {
+          e.target.textContent = "Summary Ready";
+        }
+      });
+      document.getElementById("btn-download-verified-step2").addEventListener("click", downloadCurrentArtifact);
+    });
+
+    async function handleUploadedFile(file) {
+      if (!file) return;
+      let extractedText = "";
+      if (file.name.toLowerCase().endsWith(".docx")) {
+        const buf = await file.arrayBuffer();
+        extractedText = await extractTextFromDocxBuffer(buf);
+      } else {
+        extractedText = await file.text();
+        if (file.name.toLowerCase().endsWith(".html") || file.name.toLowerCase().endsWith(".htm")) {
+          const doc = new DOMParser().parseFromString(extractedText, "text/html");
+          extractedText = doc.body ? (doc.body.innerText || doc.body.textContent || "") : extractedText;
+        }
+      }
+      loadDocument(file.name, extractedText);
+    }
+
+    document.getElementById("btn-upload-own").addEventListener("click", () => {
+      document.getElementById("file-upload").click();
+    });
+    document.getElementById("btn-browse-inline").addEventListener("click", () => {
+      document.getElementById("file-upload").click();
+    });
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragover");
+    });
+    dropzone.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("dragover");
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      await handleUploadedFile(file);
+    });
+    document.getElementById("file-upload").addEventListener("change", async (e) => {
+      await handleUploadedFile(e.target.files[0]);
+    });
+
+    renderEvaluation();
+  </script>
+</body>
+</html>
